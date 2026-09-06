@@ -51,8 +51,6 @@ else
 export PATH=/opt/miniconda3/bin:\$PATH
 export VK_DRIVER_FILES=/etc/vulkan/icd.d/nvidia_icd.json
 source /opt/miniconda3/etc/profile.d/conda.sh
-conda activate softmimicgen 2>/dev/null || true
-cd $REPO 2>/dev/null || true
 EOF
 fi
 

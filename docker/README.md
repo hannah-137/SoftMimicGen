@@ -7,7 +7,7 @@ Tested on Ubuntu 24.04 host, RTX 4090 x2, NVIDIA driver 550.127.05, nvidia-conta
     git clone https://github.com/hannah-137/SoftMimicGen.git
     cd SoftMimicGen
     bash docker/create_container.sh        # asks for mount dir and container name, then installs (15-20 min)
-    docker exec -it <name> bash            # enter; conda env is auto-activated
+    docker exec -it <name> bash            # enter, then: conda activate softmimicgen
     bash docker/verify.sh                  # generate 2 rope demos and convert to mp4
 
 ## Files
