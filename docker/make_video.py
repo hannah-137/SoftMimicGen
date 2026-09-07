@@ -16,11 +16,24 @@ SCALE = 4         # 128px는 너무 작아서 4배 확대 (512px)
 with h5py.File(hdf5_path, "r") as f:
     for demo in f["data"].keys():
         obs = f["data"][demo]["obs"]
-        agent = obs["agentview_image"][:]            # (T, 128, 128, 3)
-        hand = obs["robot0_eye_in_hand_image"][:]    # (T, 128, 128, 3)
 
-        # 두 카메라를 좌우로 붙임 → (T, 128, 256, 3)
-        frames = np.concatenate([agent, hand], axis=2)
+        # 이미지 관측 전부 찾기: (T, H, W, 3) uint8
+        cams = [k for k in obs.keys() if obs[k].ndim == 4 and obs[k].dtype == np.uint8]
+        if not cams:
+            print(f"{demo}: no image obs, skip"); continue
+        imgs = [obs[k][:] for k in cams]
+
+        # 높이를 첫 카메라에 맞춤 (태스크마다 해상도 다름)
+        import cv2
+        h = imgs[0].shape[1]
+        for i in range(1, len(imgs)):
+            if imgs[i].shape[1] != h:
+                w = int(imgs[i].shape[2] * h / imgs[i].shape[1])
+                imgs[i] = np.stack([cv2.resize(fr, (w, h), interpolation=cv2.INTER_NEAREST) for fr in imgs[i]])
+
+        # 카메라들을 좌우로 붙임 (하나면 그대로)
+        frames = np.concatenate(imgs, axis=2)
+        print(f"{demo}: cameras {cams}")
 
         # 확대 (nearest neighbor, 픽셀 뭉개지지 않게)
         frames = frames.repeat(SCALE, axis=1).repeat(SCALE, axis=2)
