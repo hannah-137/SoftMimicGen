@@ -71,8 +71,8 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
     robot0_eye_in_hand_image = CameraCfg(
         prim_path="{ENV_REGEX_NS}/Robot/panda_hand/robot0_eye_in_hand_image",
         update_period=0.0,
-        height=128,
-        width=128,
+        height=512,
+        width=512,
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
             focal_length=24.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 2)
@@ -85,8 +85,8 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
     agentview_image = CameraCfg(
         prim_path="{ENV_REGEX_NS}/agentview_image",
         update_period=0.0,
-        height=300,
-        width=300,
+        height=512,
+        width=512,
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
             focal_length=16.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 2)

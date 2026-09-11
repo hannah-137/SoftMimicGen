@@ -75,3 +75,10 @@ source/softmimicgen_assets/data/
 
 # Third-party dependencies (cloned by softmimicgen.sh)
 third_party/
+
+# experiment media
+experiments/*/inputs*/
+experiments/*/outputs*/
+videos/
+logs/
+.pip_cache/
