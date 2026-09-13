@@ -1,7 +1,7 @@
 """RGB Canny control video for Wan: obs/agentview_image -> <prefix>_canny.mp4.
 
 CRAFT-style post-processing on the rendered RGB frames: median blur, per-channel Canny, dilation, closing,
-small-blob removal. Independent of the shaded-segmentation channel (see make_shaded_canny.py)."""
+small-blob removal. Encoded losslessly. Independent of the shaded-segmentation channel (see make_shaded_canny.py)."""
 import os
 
 import cv2
@@ -41,7 +41,8 @@ def run(hdf5: str, out_dir: str, demo: str = "demo_0") -> str:
     frames = [canny_frame(im) for im in imgs]
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f"{prefix_of(hdf5)}_canny.mp4")
-    imageio.mimsave(path, frames, fps=FPS)
+    # lossless (libx264 qp 0, 4:4:4): binary edge frames compress smaller than lossy and keep exact 0/255 values
+    imageio.mimsave(path, frames, fps=FPS, codec="libx264", pixelformat="yuv444p", output_params=["-qp", "0"])
     print(
         f"rgb canny: {path} ({len(frames)} frames, {FPS}fps; canny {CANNY_LO}/{CANNY_HI}, blur {BLUR_K}, "
         f"dilate {DILATE_K}, close {CLOSE_K}, min_area {MIN_AREA})"
