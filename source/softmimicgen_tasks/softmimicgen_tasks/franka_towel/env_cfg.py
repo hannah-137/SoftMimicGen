@@ -151,6 +151,11 @@ class ObservationsCfg:
             func=mdp.ShadedCannyImage,
             params={"sensor_cfg": SceneEntityCfg("agentview_image"), "canny_low": 10, "canny_high": 100},
         )
+        # geometry edges: depth jump | normal angle | instance-id change between right/lower neighbours, 1 px lines
+        agentview_geoedge = ObsTerm(
+            func=mdp.GeoEdgeImage,
+            params={"sensor_cfg": SceneEntityCfg("agentview_image"), "depth_jump": 0.02, "normal_angle_deg": 25.0},
+        )
 
 
         def __post_init__(self):
