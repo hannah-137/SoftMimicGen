@@ -9,7 +9,7 @@ PREFIX = os.path.splitext(os.path.basename(HDF5))[0] + "_tile"
 OUT_DIR = "experiments/wan_canny/inputs"
 N_FRAMES = 81
 FPS = 16
-CANNY_LO, CANNY_HI = 80, 180
+CANNY_LO, CANNY_HI = 20, 80
 DILATE_K = 2
 CLOSE_K = 3
 

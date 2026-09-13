@@ -16,8 +16,9 @@ import torch
 import numpy as np
 from pxr import UsdGeom
 from isaaclab.assets import Articulation, DeformableObject
-from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import ManagerTermBase, SceneEntityCfg
 from isaaclab.sensors import FrameTransformer
+from isaaclab.utils.array import convert_to_torch
 from isaaclab.utils.math import quat_apply
 
 if TYPE_CHECKING:
@@ -183,3 +184,62 @@ def usd_mesh_points_w(
         world_pts = local_pts.unsqueeze(0).expand(num_envs, -1, -1) + root_pos.unsqueeze(1)
 
     return world_pts
+
+
+class ShadedCannyImage(ManagerTermBase):
+    """Canny edges of the shaded instance-id segmentation, identical to Replicator's CosmosWriter "edges" modality.
+
+    Builds the same annotator graph as ``CosmosWriter`` in instance-id mode: a Canny augmentation over
+    ``shaded_instance_id_segmentation`` (default thresholds 10/100), whose colours come from the render product's
+    ``instance_id_segmentation_fast`` node switched to ``colorize=True``. The graph is attached to the render
+    products of an existing camera sensor, and the edges are returned as (num_envs, H, W, 1) uint8.
+    Attach happens lazily on the first call so the camera's render products already exist.
+    """
+
+    def __init__(self, cfg, env):
+        super().__init__(cfg, env)
+        self._edge_annots = None
+        self._seg_annots = None
+        self._warned_empty = False
+
+    def _attach(self, sensor, canny_low: int, canny_high: int):
+        import omni.replicator.core as rep
+
+        device = "cuda" if "cuda" in sensor.device else "cpu"
+        self._edge_annots = []
+        self._seg_annots = []
+        for rp in sensor.render_product_paths:
+            # Same construction and attach order as CosmosWriter: the Canny-augmented annotator first (creates the
+            # shade node and its instance_id_segmentation_fast input with defaults), then a second annotator that
+            # sets colorize=True on that shared input node. useCandyColours stays at its default (False) so the
+            # shade kernel decodes the colorize palette exactly like the writer.
+            edge = rep.AnnotatorRegistry.get_annotator("shaded_instance_id_segmentation", device=device).augment(
+                "Canny", thresholdLow=canny_low, thresholdHigh=canny_high, name="shaded_canny"
+            )
+            seg = rep.AnnotatorRegistry.get_annotator(
+                "instance_id_segmentation_fast", init_params={"colorize": True}, device=device
+            )
+            edge.attach(rp)
+            seg.attach(rp)
+            self._edge_annots.append(edge)
+            self._seg_annots.append(seg)
+
+    def __call__(
+        self, env, sensor_cfg: SceneEntityCfg, canny_low: int = 10, canny_high: int = 100, inspect: bool = False
+    ) -> torch.Tensor:
+        sensor = env.scene.sensors[sensor_cfg.name]
+        if self._edge_annots is None:
+            self._attach(sensor, canny_low, canny_high)
+        height, width = sensor.image_shape
+        out = torch.zeros((env.num_envs, height, width, 1), dtype=torch.uint8, device=env.device)
+        for i, annot in enumerate(self._edge_annots):
+            data = annot.get_data()
+            if data is None or getattr(data, "size", 0) == 0:
+                if not self._warned_empty:
+                    print("[ShadedCannyImage] annotator returned no data yet; emitting zeros for this call")
+                    self._warned_empty = True
+                continue
+            t = convert_to_torch(data, device=env.device)
+            t = t[..., :1] if t.ndim == 3 else t[..., None]
+            out[i] = t.to(torch.uint8)
+        return out

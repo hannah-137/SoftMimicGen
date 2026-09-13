@@ -59,7 +59,17 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
     plane = AssetBaseCfg(
         prim_path="/World/GroundPlane",
         init_state=AssetBaseCfg.InitialStateCfg(pos=[0, 0, -1.05]),
-        spawn=GroundPlaneCfg(),
+        spawn=GroundPlaneCfg(color=(0.08, 0.18, 0.15)),
+    )
+
+    # backdrop wall behind robot: dark teal for Canny contrast (white arm / black table / blue towel)
+    backdrop = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Backdrop",
+        init_state=AssetBaseCfg.InitialStateCfg(pos=[-1.2, 0, 0.5]),
+        spawn=sim_utils.CuboidCfg(
+            size=(0.05, 4.0, 4.0),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.08, 0.18, 0.15)),
+        ),
     )
 
     # lights
@@ -75,7 +85,7 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
         width=512,
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
-            focal_length=24.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 2)
+            focal_length=24.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 5.0)
         ),
         offset=CameraCfg.OffsetCfg(
             pos=(0.13, 0.0, -0.15), rot=(-0.70614, 0.03701, 0.03701, -0.70614), convention="ros"
@@ -89,7 +99,7 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
         width=512,
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
-            focal_length=16.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 2)
+            focal_length=16.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 5.0)
         ),
         offset=CameraCfg.OffsetCfg(
             pos=(1.35, 0.0, 0.4), rot=(0.54168, 0.45452, 0.45452, 0.54168), convention="opengl"
@@ -135,6 +145,11 @@ class ObservationsCfg:
         robot0_eye_in_hand_image = ObsTerm(
             func=mdp.image,
             params={"sensor_cfg": SceneEntityCfg("robot0_eye_in_hand_image"), "data_type": "rgb", "normalize": False}
+        )
+        # CosmosWriter "edges": Canny (10/100) on colorized shaded instance-id segmentation, (N, 512, 512, 1) uint8
+        agentview_shadedcanny = ObsTerm(
+            func=mdp.ShadedCannyImage,
+            params={"sensor_cfg": SceneEntityCfg("agentview_image"), "canny_low": 10, "canny_high": 100},
         )
 
 
