@@ -1,24 +1,24 @@
-"""Cosmos-style edges video: obs/agentview_shadedcanny -> <prefix>_shadedcanny.mp4.
+"""Stage 3b: Cosmos-style edges video. obs/<edges>_shadedcanny -> <prefix>_shadedcanny.mp4.
+
+  python experiments/wan_canny/make_shaded_canny.py <run_dir> [--hdf5 H5] [--prefix P] [--task T] [--demo demo_0]
 
 The channel is produced inside the simulator by ShadedCannyImage (the CosmosWriter "edges" graph: Canny over the
 colorized shaded instance-id segmentation). Nothing is post-processed here: frames are sampled, replicated to
 3 channels, encoded losslessly (libx264 qp 0, 4:4:4), and every frame is decoded back and checked against the hdf5."""
-import os
-
 import imageio
 import numpy as np
 
-from common import FPS, load_obs, parse_args, prefix_of, sample_idx
+from common import FPS, load_obs, out_path, parse_args, sample_idx
 
 
-def run(hdf5: str, out_dir: str, demo: str = "demo_0"):
-    sc = load_obs(hdf5, demo, "agentview_shadedcanny")  # (T, H, W, 1) uint8, values {0, 255}
+def run(rd):
+    key = f"{rd.edges}_shadedcanny"
+    sc = load_obs(rd.hdf5, rd.demo, key)  # (T, H, W, 1) uint8, values {0, 255}
     if sc is None:
-        print("shaded canny: agentview_shadedcanny not in hdf5, skipped")
+        print(f"shaded canny: {key} not in hdf5, skipped")
         return None
     frames = np.repeat(sc[sample_idx(len(sc))], 3, axis=-1)  # (N, H, W, 3), values unchanged
-    os.makedirs(out_dir, exist_ok=True)
-    path = os.path.join(out_dir, f"{prefix_of(hdf5)}_shadedcanny.mp4")
+    path = out_path(rd, "shadedcanny.mp4")
     imageio.mimsave(path, list(frames), fps=FPS, codec="libx264", pixelformat="yuv444p", output_params=["-qp", "0"])
 
     decoded = [fr for fr in imageio.get_reader(path)]
@@ -32,5 +32,4 @@ def run(hdf5: str, out_dir: str, demo: str = "demo_0"):
 
 
 if __name__ == "__main__":
-    args = parse_args(__doc__)
-    run(args.hdf5, args.out_dir, args.demo)
+    run(parse_args(__doc__))

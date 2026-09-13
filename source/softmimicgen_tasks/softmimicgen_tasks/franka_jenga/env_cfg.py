@@ -59,7 +59,18 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
     plane = AssetBaseCfg(
         prim_path="/World/GroundPlane",
         init_state=AssetBaseCfg.InitialStateCfg(pos=[0, 0, -1.05]),
-        spawn=GroundPlaneCfg(),
+        spawn=GroundPlaneCfg(color=(0.08, 0.18, 0.15)),
+    )
+
+    # backdrop wall for Canny contrast, same colour as franka_towel; the agentview camera at (0.17, 0.3, 0.15) looks
+    # horizontally along (0.766, -0.643, 0), so the wall sits 2.5 m ahead of it, rotated -40 deg about z to face it
+    backdrop = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Backdrop",
+        init_state=AssetBaseCfg.InitialStateCfg(pos=[2.09, -1.31, 1.0], rot=[0.93969, 0.0, 0.0, -0.34202]),
+        spawn=sim_utils.CuboidCfg(
+            size=(0.05, 6.0, 6.0),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.08, 0.18, 0.15)),
+        ),
     )
 
     # lights
@@ -75,7 +86,7 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
         width=128,
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
-            focal_length=24.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 2)
+            focal_length=24.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 5.0)
         ),
         offset=CameraCfg.OffsetCfg(
             pos=(0.13, 0.0, -0.15), rot=(-0.70614, 0.03701, 0.03701, -0.70614), convention="ros"
@@ -85,11 +96,11 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
     agentview_image = CameraCfg(
         prim_path="{ENV_REGEX_NS}/agentview_image",
         update_period=0.0,
-        height=128,
-        width=128,
+        height=512,  # Wan pipeline control videos are 512x512 (was 128)
+        width=512,
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
-            focal_length=18.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 2)
+            focal_length=18.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 5.0)
         ),
         offset=CameraCfg.OffsetCfg(
             pos=(0.17, 0.3, 0.15), rot=(-0.29884, -0.29884, 0.64086, 0.64086), convention="opengl"
@@ -138,7 +149,15 @@ class ObservationsCfg:
             func=mdp.image,
             params={"sensor_cfg": SceneEntityCfg("robot0_eye_in_hand_image"), "data_type": "rgb", "normalize": False}
         )
-
+        # Wan pipeline edge channels (see experiments/wan_canny/tasks.py): CosmosWriter-style Canny and geometry edges
+        agentview_shadedcanny = ObsTerm(
+            func=mdp.ShadedCannyImage,
+            params={"sensor_cfg": SceneEntityCfg("agentview_image"), "canny_low": 10, "canny_high": 100},
+        )
+        agentview_geoedge = ObsTerm(
+            func=mdp.GeoEdgeImage,
+            params={"sensor_cfg": SceneEntityCfg("agentview_image"), "depth_jump": 0.02, "normal_angle_deg": 25.0},
+        )
 
         def __post_init__(self):
             self.enable_corruption = False

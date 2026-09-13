@@ -1,51 +1,77 @@
 #!/usr/bin/env bash
-# Runs INSIDE the container (softmimicgen env). Interactive: asks robot/task/tag/gpu/n, then generates one hdf5.
-#   -> datasets/generated_dataset/<robot>_<task>_<tag>.hdf5 , log in logs/gen_<robot>_<task>_<tag>.txt
-set -eo pipefail
+# Wan pipeline, all stages for one or more tasks. Runs INSIDE the container (activates the env each stage needs).
+#   bash docker/gen.sh <task[,task...]|all> <tag> [--n N] [--gpu N] [--from K] [--only K] [--controls a,b] [--ref PNG] [--force]
+#     task      key(s) of experiments/wan_canny/tasks.py, e.g. franka_towel or franka_towel,yam_bag; all = every entry
+#     --n       demos per task for stage 1 (default 1)          --gpu    GPU for Isaac Sim (default 0; GPU 1 hangs)
+#     --from K  start at stage K (earlier outputs must exist)   --only K run stage K only
+#     --controls, --ref, --force  passed to make_wan.py (stage 4)
+# Stages, all writing flat into experiments/wan_canny/runs/<task>_<tag>/  (prefix = <task>_<tag>):
+#   1 hdf5      docker/make_hdf5.sh                                   (softmimicgen)  <prefix>.hdf5, _gen.log
+#   2 source    make_source.py                                        (softmimicgen)  _source.mp4, _ref_sim.png
+#   3 edges     make_rgb_canny.py make_shaded_canny.py make_geo_edge.py (softmimicgen)  _canny _shadedcanny _geoedge
+#               make_learned_edges.py                                 (rgb_edge)      _hed _pidinet _teed _lineart
+#   4 wan       make_wan.py  (ComfyUI on GPU 1, auto-started)         (softmimicgen)  _wan_<control>.mp4 + .json
+# Everything printed is also appended to <prefix>_pipeline.log. A failing task does not stop the others; the exit
+# code is non-zero if any task failed. Each stage script can be run on its own with the same run folder.
+set -uo pipefail
 cd /workspace/SoftMimicGen
-mkdir -p logs datasets/generated_dataset
+source /opt/miniconda3/etc/profile.d/conda.sh
+WC=experiments/wan_canny
+RGB_EDGE_ENV=/workspace/tools/envs/rgb_edge
+export PYTHONUNBUFFERED=1 HF_HOME=/workspace/tools/rgb_edge_models
 
-ROBOTS="franka humanoid surgical yam"
-tasks_for() { case "$1" in
-  franka)   echo "rope towel jenga stack";;
-  humanoid) echo "teddy towel";;
-  surgical) echo "tissue threading";;
-  yam)      echo "towel bag";;
-esac; }
+usage() { sed -n '2,8p' "$0"; exit 1; }
+[ $# -ge 2 ] || usage
+TASK_ARG="$1"; TAG="$2"; shift 2
+N=1; GPU=0; FROM=1; ONLY=""; WAN_ARGS=()
+while [ $# -gt 0 ]; do case "$1" in
+  --n) N="$2"; shift 2;;            --gpu) GPU="$2"; shift 2;;
+  --from) FROM="$2"; shift 2;;      --only) ONLY="$2"; shift 2;;
+  --controls) WAN_ARGS+=(--controls "$2"); shift 2;;
+  --ref) WAN_ARGS+=(--ref "$2"); shift 2;;
+  --force) WAN_ARGS+=(--force); shift;;
+  *) echo "unknown option: $1"; usage;;
+esac; done
 
-ask_choice() {  # ask_choice "prompt" "opt1 opt2 ..."
-  local ans
-  while true; do
-    read -rp "$1 [${2// //}]: " ans
-    for o in $2; do [ "$ans" = "$o" ] && { echo "$ans"; return; }; done
-    echo "  -> choose one of: $2" >&2
-  done
+conda activate softmimicgen
+ALL_TASKS=$(cd $WC && python -c "import tasks; print(' '.join(tasks.TASKS))")
+if [ "$TASK_ARG" = all ]; then TASKS="$ALL_TASKS"; else TASKS="${TASK_ARG//,/ }"; fi
+for t in $TASKS; do case " $ALL_TASKS " in *" $t "*) ;; *) echo "unknown task: $t (one of: $ALL_TASKS)"; exit 1;; esac; done
+
+want() { if [ -n "$ONLY" ]; then [ "$ONLY" = "$1" ]; else [ "$1" -ge "$FROM" ]; fi; }
+
+# stage <n> <label> <command...>: run in the current env, tee to the task log, return the command's status
+stage() {
+  local n="$1" label="$2"; shift 2
+  echo "=== [$PREFIX] stage $n: $label  ($(date '+%F %T'))" | tee -a "$LOG"
+  "$@" 2>&1 | tee -a "$LOG"
+  local rc=${PIPESTATUS[0]}
+  [ "$rc" = 0 ] || echo "=== [$PREFIX] stage $n FAILED (exit $rc)" | tee -a "$LOG"
+  return "$rc"
 }
 
-ROBOT=$(ask_choice "Robot" "$ROBOTS")
-TASK=$(ask_choice "Task for $ROBOT" "$(tasks_for "$ROBOT")")
-while [ -z "$TAG" ]; do read -rp "Tag (e.g. 512_bg): " TAG; done
-read -rp "GPU [0]: " GPU; GPU="${GPU:-0}"
-read -rp "Number of demos [1]: " N; N="${N:-1}"
+declare -A RESULT
+for TASK in $TASKS; do
+  PREFIX="${TASK}_${TAG}"; RUN="$WC/runs/$PREFIX"; LOG="$RUN/${PREFIX}_pipeline.log"
+  mkdir -p "$RUN"
+  echo "##### $PREFIX -> $RUN/  ($(date '+%F %T'))" | tee -a "$LOG"
+  T0=$(date +%s); ok=1
+  conda activate softmimicgen
+  if [ $ok = 1 ] && want 1; then stage 1 hdf5 bash docker/make_hdf5.sh "$TASK" "$TAG" "$N" "$GPU" || ok=0; fi
+  if [ $ok = 1 ] && want 2; then stage 2 source python $WC/make_source.py "$RUN" || ok=0; fi
+  if [ $ok = 1 ] && want 3; then
+    stage 3 "rgb canny" python $WC/make_rgb_canny.py "$RUN" || ok=0
+    stage 3 "shaded canny" python $WC/make_shaded_canny.py "$RUN" || ok=0
+    stage 3 "geo edge" python $WC/make_geo_edge.py "$RUN" || ok=0
+    conda activate "$RGB_EDGE_ENV"
+    stage 3 "learned edges (rgb_edge env)" python $WC/make_learned_edges.py "$RUN" || ok=0
+    conda activate softmimicgen
+  fi
+  if [ $ok = 1 ] && want 4; then stage 4 wan python $WC/make_wan.py "$RUN" "${WAN_ARGS[@]}" || ok=0; fi
+  RESULT[$TASK]=$([ $ok = 1 ] && echo OK || echo FAILED)
+  echo "##### $PREFIX ${RESULT[$TASK]} in $(( ($(date +%s) - T0) / 60 )) min -> $RUN/" | tee -a "$LOG"
+done
 
-IN="datasets/annotated_dataset/annotated_dataset_${ROBOT}_${TASK}.hdf5"
-OUT="datasets/generated_dataset/${ROBOT}_${TASK}_${TAG}.hdf5"
-[ -f "$IN" ] || { echo "input not found: $IN"; exit 1; }
-[ -f "$OUT" ] && echo "note: $OUT exists and will be overwritten"
-
-read -rp "Generate $ROBOT/$TASK -> $(basename "$OUT") on GPU $GPU, $N demo(s)? [Y/n] " go
-[[ "${go:-Y}" =~ ^[Yy]$ ]] || { echo "cancelled"; exit 0; }
-
-echo Yes | PYTHONUNBUFFERED=1 python scripts/imitation_learning/isaaclab_mimic/generate_dataset.py \
-  --device "cuda:$GPU" --num_envs 1 --generation_num_trials "$N" \
-  --input_file "$IN" --output_file "$OUT" --enable_cameras --headless \
-  --kit_args "--/renderer/multiGpu/enabled=false --/renderer/activeGpu=$GPU" \
-  2>&1 | tee "logs/gen_${ROBOT}_${TASK}_${TAG}.txt"
-echo "output: $OUT"
-
-# Canny + source video
-PREFIX="${ROBOT}_${TASK}_${TAG}"
-python experiments/wan_canny/make_videos.py "$OUT"
-rm -rf "experiments/wan_canny/inputs_${PREFIX}"
-mv experiments/wan_canny/inputs "experiments/wan_canny/inputs_${PREFIX}"
-echo "videos: experiments/wan_canny/inputs_${PREFIX}/"
+echo; echo "summary (tag $TAG):"; fail=0
+for TASK in $TASKS; do printf "  %-24s %s\n" "$TASK" "${RESULT[$TASK]}"; [ "${RESULT[$TASK]}" = OK ] || fail=1; done
+exit $fail

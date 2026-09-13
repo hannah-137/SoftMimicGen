@@ -1,4 +1,6 @@
-"""RGB Canny control video for Wan: obs/agentview_image -> <prefix>_canny.mp4.
+"""Stage 3a: RGB Canny control video. obs/<camera> -> <prefix>_canny.mp4.
+
+  python experiments/wan_canny/make_rgb_canny.py <run_dir> [--hdf5 H5] [--prefix P] [--task T] [--demo demo_0]
 
 Pipeline on the rendered RGB frames: bilateral filter -> colour Canny (3-channel Sobel, per-pixel max-magnitude
 channel) -> close / small-blob removal, no dilation (1 px lines like the shaded-canny channel, Wan-Fun's own
@@ -8,13 +10,11 @@ edges) ground truth on franka_towel_cosmos_v4 (512 configs, 27 frames, boundary 
 post-processing is the best variant without dilation: F1 0.838 (precision 0.831, recall 0.846). With dilate 2 the
 same pipeline scores 0.843; the previous median-7 / per-channel Canny 10/70 / dilate 2 pipeline scored 0.823.
 Independent of the shaded-segmentation channel (see make_shaded_canny.py)."""
-import os
-
 import cv2
 import imageio
 import numpy as np
 
-from common import FPS, load_obs, parse_args, prefix_of, sample_idx
+from common import FPS, load_obs, out_path, parse_args, sample_idx
 
 BILATERAL_D, BILATERAL_SIGMA_COLOR, BILATERAL_SIGMA_SPACE = 9, 50, 7  # edge-preserving pre-filter (kills weave)
 CANNY_LO, CANNY_HI = 30, 100   # hysteresis thresholds on the L1 gradient (|dx| + |dy|)
@@ -45,12 +45,11 @@ def canny_frame(im: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(edges, cv2.COLOR_GRAY2RGB)
 
 
-def run(hdf5: str, out_dir: str, demo: str = "demo_0") -> str:
-    imgs = load_obs(hdf5, demo, "agentview_image")
+def run(rd) -> str:
+    imgs = load_obs(rd.hdf5, rd.demo, rd.camera)
     imgs = imgs[sample_idx(len(imgs))]
     frames = [canny_frame(im) for im in imgs]
-    os.makedirs(out_dir, exist_ok=True)
-    path = os.path.join(out_dir, f"{prefix_of(hdf5)}_canny.mp4")
+    path = out_path(rd, "canny.mp4")
     # lossless (libx264 qp 0, 4:4:4): binary edge frames compress smaller than lossy and keep exact 0/255 values
     imageio.mimsave(path, frames, fps=FPS, codec="libx264", pixelformat="yuv444p", output_params=["-qp", "0"])
     print(
@@ -62,5 +61,4 @@ def run(hdf5: str, out_dir: str, demo: str = "demo_0") -> str:
 
 
 if __name__ == "__main__":
-    args = parse_args(__doc__)
-    run(args.hdf5, args.out_dir, args.demo)
+    run(parse_args(__doc__))

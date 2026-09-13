@@ -1,24 +1,25 @@
-"""Learned edge/line videos from one generated hdf5: <prefix>_hed.mp4, _pidinet.mp4, _teed.mp4, _lineart.mp4.
+"""Stage 3d: learned edge/line videos. obs/<camera> -> <prefix>_hed.mp4, _pidinet.mp4, _teed.mp4, _lineart.mp4.
 
 Runs in the rgb_edge env (docker/setup_rgb_edge.sh), NOT in softmimicgen:
   source /opt/miniconda3/etc/profile.d/conda.sh && conda activate /workspace/tools/envs/rgb_edge
-  HF_HOME=/workspace/tools/rgb_edge_models python experiments/wan_canny/make_learned_edges.py <hdf5> \
-      [--out_dir DIR] [--demo demo_0] [--detectors hed,pidinet,teed,lineart]
+  HF_HOME=/workspace/tools/rgb_edge_models python experiments/wan_canny/make_learned_edges.py <run_dir> \
+      [--hdf5 H5] [--prefix P] [--task T] [--demo demo_0] [--detectors hed,pidinet,teed,lineart] [--device cuda:N]
+      [--roi hsv_blue|none]
 
 Each detector's soft map (0..255) is binarized to 1 px lines with learned_edges.binarize so the videos are comparable
 with _canny.mp4 / _shadedcanny.mp4. The per-detector DEFAULTS are the best settings of the 2026-09-13 benchmark
 against the shaded-canny ground truth (EDGE_BENCHMARK.md): HED / PiDiNet / LineArt use the region-adaptive
-threshold (lower inside the towel, --roi hsv_blue) with NMS ridge thinning; TEED uses the plain threshold path.
+threshold (lower inside the ROI) with NMS ridge thinning; TEED uses the plain threshold path. The ROI comes from
+tasks.TASKS[task]["roi"] (hsv_blue = the blue towel) unless --roi is given.
 Same 81-frame sampling, 16 fps and lossless encoding as the other make_*.py scripts.
 """
 import argparse
-import os
 
 import imageio
 import numpy as np
 
 import learned_edges as LE
-from common import DEFAULT_OUT_DIR, FPS, load_obs, prefix_of, sample_idx
+from common import FPS, add_run_args, load_obs, out_path, resolve_run, sample_idx
 
 # binarize kwargs: threshold (everywhere), threshold_in (inside the ROI), nms_sigma, close_k, min_area
 DEFAULTS = {
@@ -33,20 +34,19 @@ DEFAULTS = {
 }
 
 
-def run(hdf5: str, out_dir: str, demo: str = "demo_0", detectors=LE.DETECTORS, device: str | None = None,
-        roi: str = "hsv_blue"):
-    imgs = load_obs(hdf5, demo, "agentview_image")
+def run(rd, detectors=LE.DETECTORS, device: str | None = None, roi: str | None = None):
+    roi = roi or rd.roi
+    imgs = load_obs(rd.hdf5, rd.demo, rd.camera)
     imgs = imgs[sample_idx(len(imgs))]
     device = device or LE.pick_device()
     rois = [LE.roi_mask(im, roi) for im in imgs]
-    os.makedirs(out_dir, exist_ok=True)
     paths = {}
     for name in detectors:
         cfg = DEFAULTS[name]
         maps, spf = LE.timed_soft_maps(name, imgs, device, detect_resolution=cfg["detect_resolution"], **cfg["opts"])
         lines = np.stack([LE.binarize(m, roi=r, **cfg["binarize"]) for m, r in zip(maps, rois)]).astype(np.uint8) * 255
         frames = np.repeat(lines[..., None], 3, axis=-1)
-        path = os.path.join(out_dir, f"{prefix_of(hdf5)}_{name}.mp4")
+        path = out_path(rd, f"{name}.mp4")
         imageio.mimsave(path, list(frames), fps=FPS, codec="libx264", pixelformat="yuv444p", output_params=["-qp", "0"])
         decoded = [fr for fr in imageio.get_reader(path)]
         ok = len(decoded) == len(frames) and all(np.array_equal(d, r) for d, r in zip(decoded, frames))
@@ -59,13 +59,11 @@ def run(hdf5: str, out_dir: str, demo: str = "demo_0", detectors=LE.DETECTORS, d
 
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("hdf5")
-    p.add_argument("--out_dir", default=DEFAULT_OUT_DIR)
-    p.add_argument("--demo", default="demo_0")
+    p = add_run_args(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter))
     p.add_argument("--detectors", default=",".join(LE.DETECTORS), help="comma-separated subset of " + ",".join(LE.DETECTORS))
     p.add_argument("--device", default=None, help="cuda:N or cpu; default = CUDA device with the most free memory")
-    p.add_argument("--roi", default="hsv_blue", choices=["hsv_blue", "none"],
-                   help="region for the lower threshold (hsv_blue = the blue towel); none = single threshold everywhere")
+    p.add_argument("--roi", default=None, choices=["hsv_blue", "none"],
+                   help="region for the lower threshold (default: tasks.TASKS[task]['roi']); none = single threshold")
     a = p.parse_args()
-    run(a.hdf5, a.out_dir, a.demo, [d.strip() for d in a.detectors.split(",") if d.strip()], a.device, a.roi)
+    rd = resolve_run(a.run_dir, a.hdf5, a.prefix, a.task, a.demo)
+    run(rd, [d.strip() for d in a.detectors.split(",") if d.strip()], a.device, a.roi)
