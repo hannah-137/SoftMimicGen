@@ -6,6 +6,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
 from dataclasses import MISSING
 
 import isaaclab.sim as sim_utils
@@ -40,6 +41,15 @@ width, height = 640, 480
 intrinsic_matrix = [
     392.1729, 0, 324.6466,
     0, 391.6392, 244.5516,
+    0, 0, 1
+]
+
+# Wan pipeline: the top camera renders 512x512 (control videos are square). Same focal length, centred principal
+# point = the original 640x480 view cropped to a square (64 px cut on each side, 16 px gained top and bottom).
+top_width, top_height = 512, 512
+top_intrinsic_matrix = [
+    392.1729, 0, 256.0,
+    0, 391.6392, 256.0,
     0, 0, 1
 ]
 
@@ -81,8 +91,8 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/TopCamera",
         update_period=0.0,
         update_latest_camera_pose=True,
-        height=height,
-        width=width,
+        height=top_height,
+        width=top_width,
         data_types=[
             "rgb",
             "distance_to_image_plane",
@@ -90,9 +100,9 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
         ],
         colorize_semantic_segmentation=False,
         spawn=sim_utils.PinholeCameraCfg.from_intrinsic_matrix(
-            intrinsic_matrix=intrinsic_matrix,
-            width=width,
-            height=height,
+            intrinsic_matrix=top_intrinsic_matrix,
+            width=top_width,
+            height=top_height,
             f_stop=0.0,
             projection_type="pinhole",
             lock_camera=False,
@@ -188,10 +198,30 @@ class ObservationsCfg:
 
         state = ObsTerm(func=mdp.state)
 
+        # Wan pipeline: native 512x512 (no crop/resize) so the rgb obs and the edge channels below are pixel-aligned
         top = ObsTerm(
-            func=mdp.image_cropped,
+            func=mdp.image,
             params={"sensor_cfg": SceneEntityCfg("top_camera"), "data_type": "rgb", "normalize": False},
         )
+        top_shadedcanny = ObsTerm(
+            func=mdp.ShadedCannyImage,
+            params={"sensor_cfg": SceneEntityCfg("top_camera"), "canny_low": 10, "canny_high": 100},
+        )
+        top_geoedge = ObsTerm(
+            func=mdp.GeoEdgeImage,
+            params={"sensor_cfg": SceneEntityCfg("top_camera"), "depth_jump": 0.02, "normal_angle_deg": 25.0},
+        )
+        # shaded Canny OR depth-discontinuity edges (same annotators as the two terms above)
+        top_shadedcanny_depth = ObsTerm(
+            func=mdp.ShadedCannyDepthImage,
+            params={"sensor_cfg": SceneEntityCfg("top_camera"), "canny_low": 10, "canny_high": 100, "depth_jump": 0.02},
+        )
+        # the shaded instance-id segmentation itself (input of the shaded Canny), RGB, for inspection
+        top_shaded = ObsTerm(func=mdp.ShadedSegImage, params={"sensor_cfg": SceneEntityCfg("top_camera")})
+        # the three GeoEdgeImage inputs as 8-bit images, for inspection (depth 0..far plane -> 0..255)
+        top_depth = ObsTerm(func=mdp.GeoInputImage, params={"sensor_cfg": SceneEntityCfg("top_camera"), "kind": "depth"})
+        top_normals = ObsTerm(func=mdp.GeoInputImage, params={"sensor_cfg": SceneEntityCfg("top_camera"), "kind": "normals"})
+        top_instance = ObsTerm(func=mdp.GeoInputImage, params={"sensor_cfg": SceneEntityCfg("top_camera"), "kind": "instance"})
 
         left = ObsTerm(
             func=mdp.image_cropped,
@@ -219,6 +249,11 @@ class ObservationsCfg:
         def __post_init__(self):
             self.enable_corruption = False
             self.concatenate_terms = False
+            if os.environ.get("WAN_INSPECT") != "1":  # inspection channels only with --inspect (gen.sh/make_hdf5.sh)
+                self.top_shaded = None
+                self.top_depth = None
+                self.top_normals = None
+                self.top_instance = None
 
     # observation groups
     policy: PolicyCfg = PolicyCfg()

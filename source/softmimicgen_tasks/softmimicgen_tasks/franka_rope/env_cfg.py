@@ -6,6 +6,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
 from dataclasses import MISSING
 
 import isaaclab.sim as sim_utils
@@ -59,7 +60,7 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
     plane = AssetBaseCfg(
         prim_path="/World/GroundPlane",
         init_state=AssetBaseCfg.InitialStateCfg(pos=[0, 0, -1.05]),
-        spawn=GroundPlaneCfg(color=(0.08, 0.18, 0.15)),
+        spawn=GroundPlaneCfg(),
     )
 
     # backdrop wall for Canny contrast, same colour as franka_towel; the agentview camera at (0.5, 0.5, 0.4) looks
@@ -67,7 +68,7 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
     backdrop = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Backdrop",
         init_state=AssetBaseCfg.InitialStateCfg(pos=[0.5, -1.3, 1.0]),
-        spawn=sim_utils.CuboidCfg(
+        spawn=mdp.BackdropCfg(  # renders but casts no shadows, so it does not darken the dome-lit table
             size=(6.0, 0.05, 6.0),
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.08, 0.18, 0.15)),
         ),
@@ -153,10 +154,26 @@ class ObservationsCfg:
             func=mdp.GeoEdgeImage,
             params={"sensor_cfg": SceneEntityCfg("agentview_image"), "depth_jump": 0.02, "normal_angle_deg": 25.0},
         )
+        # shaded Canny OR depth-discontinuity edges (same annotators as the two terms above)
+        agentview_shadedcanny_depth = ObsTerm(
+            func=mdp.ShadedCannyDepthImage,
+            params={"sensor_cfg": SceneEntityCfg("agentview_image"), "canny_low": 10, "canny_high": 100, "depth_jump": 0.02},
+        )
+        # the shaded instance-id segmentation itself (input of the shaded Canny), RGB, for inspection
+        agentview_shaded = ObsTerm(func=mdp.ShadedSegImage, params={"sensor_cfg": SceneEntityCfg("agentview_image")})
+        # the three GeoEdgeImage inputs as 8-bit images, for inspection (depth 0..far plane -> 0..255)
+        agentview_depth = ObsTerm(func=mdp.GeoInputImage, params={"sensor_cfg": SceneEntityCfg("agentview_image"), "kind": "depth"})
+        agentview_normals = ObsTerm(func=mdp.GeoInputImage, params={"sensor_cfg": SceneEntityCfg("agentview_image"), "kind": "normals"})
+        agentview_instance = ObsTerm(func=mdp.GeoInputImage, params={"sensor_cfg": SceneEntityCfg("agentview_image"), "kind": "instance"})
 
         def __post_init__(self):
             self.enable_corruption = False
             self.concatenate_terms = False
+            if os.environ.get("WAN_INSPECT") != "1":  # inspection channels only with --inspect (gen.sh/make_hdf5.sh)
+                self.agentview_shaded = None
+                self.agentview_depth = None
+                self.agentview_normals = None
+                self.agentview_instance = None
 
     @configclass
     class SubtaskCfg(ObsGroup):

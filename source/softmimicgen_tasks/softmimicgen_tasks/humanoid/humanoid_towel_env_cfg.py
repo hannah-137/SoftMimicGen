@@ -6,6 +6,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
 import tempfile
 import torch
 
@@ -113,8 +114,8 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
     robot_pov_cam = CameraCfg(
         prim_path="{ENV_REGEX_NS}/RobotPOVCam",
         update_period=0.0,
-        height=160,
-        width=256,
+        height=320,  # Wan pipeline: 2x the original 256x160, same field of view
+        width=512,
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(focal_length=12, clipping_range=(0.1, 2)),
         offset=CameraCfg.OffsetCfg(pos=(0.0, 0.12, 1.67675), rot=(-0.25882, 0.96593, 0.0, 0.0), convention="ros"),
@@ -301,11 +302,36 @@ class ObservationsCfg:
             func=mdp.image,
             params={"sensor_cfg": SceneEntityCfg("robot_pov_cam"), "data_type": "rgb", "normalize": False},
         )
+        # Wan pipeline edge channels (see experiments/wan_canny/tasks.py): CosmosWriter-style Canny and geometry edges
+        robot_pov_cam_shadedcanny = ObsTerm(
+            func=mdp.ShadedCannyImage,
+            params={"sensor_cfg": SceneEntityCfg("robot_pov_cam"), "canny_low": 10, "canny_high": 100},
+        )
+        robot_pov_cam_geoedge = ObsTerm(
+            func=mdp.GeoEdgeImage,
+            params={"sensor_cfg": SceneEntityCfg("robot_pov_cam"), "depth_jump": 0.02, "normal_angle_deg": 25.0},
+        )
+        # shaded Canny OR depth-discontinuity edges (same annotators as the two terms above)
+        robot_pov_cam_shadedcanny_depth = ObsTerm(
+            func=mdp.ShadedCannyDepthImage,
+            params={"sensor_cfg": SceneEntityCfg("robot_pov_cam"), "canny_low": 10, "canny_high": 100, "depth_jump": 0.02},
+        )
+        # the shaded instance-id segmentation itself (input of the shaded Canny), RGB, for inspection
+        robot_pov_cam_shaded = ObsTerm(func=mdp.ShadedSegImage, params={"sensor_cfg": SceneEntityCfg("robot_pov_cam")})
+        # the three GeoEdgeImage inputs as 8-bit images, for inspection (depth 0..far plane -> 0..255)
+        robot_pov_cam_depth = ObsTerm(func=mdp.GeoInputImage, params={"sensor_cfg": SceneEntityCfg("robot_pov_cam"), "kind": "depth"})
+        robot_pov_cam_normals = ObsTerm(func=mdp.GeoInputImage, params={"sensor_cfg": SceneEntityCfg("robot_pov_cam"), "kind": "normals"})
+        robot_pov_cam_instance = ObsTerm(func=mdp.GeoInputImage, params={"sensor_cfg": SceneEntityCfg("robot_pov_cam"), "kind": "instance"})
 
 
         def __post_init__(self):
             self.enable_corruption = False
             self.concatenate_terms = False
+            if os.environ.get("WAN_INSPECT") != "1":  # inspection channels only with --inspect (gen.sh/make_hdf5.sh)
+                self.robot_pov_cam_shaded = None
+                self.robot_pov_cam_depth = None
+                self.robot_pov_cam_normals = None
+                self.robot_pov_cam_instance = None
 
     # observation groups
     policy: PolicyCfg = PolicyCfg()
