@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stage 1 of the Wan pipeline (docker/gen.sh chains all stages). Runs INSIDE the container, softmimicgen env.
 # Generates one hdf5 with Isaac Lab Mimic from the annotated source dataset into the run folder.
-#   bash docker/make_hdf5.sh <task> <tag> [n_demos=1] [gpu=0]      # no arguments -> asks interactively
+#   bash docker/make_hdf5.sh <task> <tag> [n_demos=1] [gpu=0] [--inspect]   # no arguments -> asks interactively
 # <task> is a key of experiments/wan_canny/tasks.py (e.g. franka_towel). The run folder
 # experiments/wan_canny/runs/<task>_<tag>/ receives <task>_<tag>.hdf5 (+ _failed.hdf5) and <task>_<tag>_gen.log.
 # GPU: use 0. Camera rendering on cuda:1 hangs at the first sim.reset() in this container (checked 2026-09-13).
@@ -10,6 +10,10 @@ cd /workspace/SoftMimicGen
 TASKS=$(cd experiments/wan_canny && python -c "import tasks; print(' '.join(tasks.TASKS))")
 is_task() { for t in $TASKS; do [ "$1" = "$t" ] && return 0; done; return 1; }
 
+# --inspect anywhere in the arguments: also record the inspection channels (<cam>_shaded, ...) in the hdf5
+INSPECT=0; ARGS=()
+for a in "$@"; do if [ "$a" = "--inspect" ]; then INSPECT=1; else ARGS+=("$a"); fi; done
+set -- "${ARGS[@]}"
 TASK="${1:-}"; TAG="${2:-}"; N="${3:-1}"; GPU="${4:-0}"
 if [ $# -eq 0 ]; then
   until is_task "$TASK"; do read -rp "Task [${TASKS// //}]: " TASK; done
@@ -35,11 +39,13 @@ if [ $# -eq 0 ]; then
   [[ "${go:-Y}" =~ ^[Yy]$ ]] || { echo "cancelled"; exit 0; }
 fi
 
+[ "$INSPECT" = 1 ] && export WAN_INSPECT=1 && echo "hdf5: --inspect: recording the inspection channels too"
 echo "hdf5: $TASK -> $OUT on GPU $GPU, $N demo(s)  (log: $LOG)"
 echo Yes | PYTHONUNBUFFERED=1 python scripts/imitation_learning/isaaclab_mimic/generate_dataset.py \
   --device "cuda:$GPU" --num_envs 1 --generation_num_trials "$N" $EXTRA \
   --input_file "$IN" --output_file "$OUT" --enable_cameras --headless \
   --kit_args "--/renderer/multiGpu/enabled=false --/renderer/activeGpu=$GPU" \
   2>&1 | tee "$LOG" || true
+chown -R --reference=experiments/wan_canny "$RUN_DIR" 2>/dev/null || true  # container is root; give the folder to the repo owner
 [ -f "$OUT" ] || { echo "hdf5: generation failed, $OUT not written (see $LOG)"; exit 1; }
 echo "hdf5: $OUT"

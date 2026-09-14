@@ -1,18 +1,30 @@
 #!/usr/bin/env bash
 # Wan pipeline, all stages for one or more tasks. Runs INSIDE the container (activates the env each stage needs).
-#   bash docker/gen.sh <task[,task...]|all> <tag> [--n N] [--gpu N] [--from K] [--only K] [--controls a,b] [--ref PNG] [--force]
+#   bash docker/gen.sh <task[,task...]|all> <tag> [--n N] [--gpu N] [--from K] [--only K] [--n_ref N] [--lightning]
+#                      [--controls a,b] [--ref PNG] [--force] [--inspect]
 #     task      key(s) of experiments/wan_canny/tasks.py, e.g. franka_towel or franka_towel,yam_bag; all = every entry
 #     --n       demos per task for stage 1 (default 1)          --gpu    GPU for Isaac Sim (default 0; GPU 1 hangs)
 #     --from K  start at stage K (earlier outputs must exist)   --only K run stage K only
-#     --controls, --ref, --force  passed to make_wan.py (stage 4)
-# Stages, all writing flat into experiments/wan_canny/runs/<task>_<tag>/  (prefix = <task>_<tag>):
+#     --n_ref N  stage 4 first generates N reference images with Qwen-Image-Edit (make_refs.py, images/_ref_ai_01..NN.png);
+#                without it stage 4 expects user-made reference images.   --lightning  fast 4-step LoRA for make_refs.py
+#     --controls, --ref, --force  passed to make_wan.py (stage 4; --force also to make_refs.py)
+#     --inspect  stage 1 also records the inspection channels (<cam>_shaded, ...) -> extra _shaded.mp4 etc. in stage 3
+# Stages, all writing into experiments/wan_canny/runs/<task>_<tag>/  (prefix = <task>_<tag>): hdf5 + logs at the root,
+#   videos in sources/ edges/ wans/, reference images in images/
 #   1 hdf5      docker/make_hdf5.sh                                   (softmimicgen)  <prefix>.hdf5, _gen.log
 #   2 source    make_source.py                                        (softmimicgen)  _source.mp4, _ref_sim.png
 #   3 edges     make_rgb_canny.py make_shaded_canny.py make_geo_edge.py (softmimicgen)  _canny _shadedcanny _geoedge
+#               make_shaded_canny_depth.py make_union.py           (softmimicgen)  _shadedcanny_depth _union
+#               make_shaded.py make_geo_inputs.py  (--inspect only) (softmimicgen)  _shaded _depth _normals _instance
 #               make_learned_edges.py                                 (rgb_edge)      _hed _pidinet _teed _lineart
-#   4 wan       make_wan.py  (ComfyUI on GPU 1, auto-started)         (softmimicgen)  _wan_<control>.mp4 + .json
+#   4 refs      make_refs.py (--n_ref only; ComfyUI on GPU 1)         (softmimicgen)  images/_ref_ai_01..NN.png + .json
+#     wan       make_wan.py  (ComfyUI on GPU 1, auto-started)         (softmimicgen)  _wan_<control><ref>.mp4 + .json
+# Stage 4 needs reference images in images/: <prefix>_ref_ai.png and/or <prefix>_ref_ai_01.png, _02.png, ... (photorealistic
+# versions of <prefix>_ref_sim.png, the stage 2 frame, same composition). One Wan video per (reference, control), the
+# reference suffix appended (_wan_canny_01.mp4). If there is none the task ends as NEED_REF after stage 3; drop the
+# files in and rerun with --from 4 (existing videos are skipped). Pass --ref sim to use the simulator frame on purpose.
 # Everything printed is also appended to <prefix>_pipeline.log. A failing task does not stop the others; the exit
-# code is non-zero if any task failed. Each stage script can be run on its own with the same run folder.
+# code is non-zero if any task failed (NEED_REF is not a failure). Each stage script can be run on its own.
 set -uo pipefail
 cd /workspace/SoftMimicGen
 source /opt/miniconda3/etc/profile.d/conda.sh
@@ -23,13 +35,15 @@ export PYTHONUNBUFFERED=1 HF_HOME=/workspace/tools/rgb_edge_models
 usage() { sed -n '2,8p' "$0"; exit 1; }
 [ $# -ge 2 ] || usage
 TASK_ARG="$1"; TAG="$2"; shift 2
-N=1; GPU=0; FROM=1; ONLY=""; WAN_ARGS=()
+N=1; GPU=0; FROM=1; ONLY=""; WAN_ARGS=(); REF=""; INSPECT=""; N_REF=0; REF_ARGS=()
 while [ $# -gt 0 ]; do case "$1" in
   --n) N="$2"; shift 2;;            --gpu) GPU="$2"; shift 2;;
   --from) FROM="$2"; shift 2;;      --only) ONLY="$2"; shift 2;;
   --controls) WAN_ARGS+=(--controls "$2"); shift 2;;
-  --ref) WAN_ARGS+=(--ref "$2"); shift 2;;
-  --force) WAN_ARGS+=(--force); shift;;
+  --ref) REF="$2"; WAN_ARGS+=(--ref "$2"); shift 2;;
+  --force) WAN_ARGS+=(--force); REF_ARGS+=(--force); shift;;
+  --n_ref) N_REF="$2"; shift 2;;         --lightning) REF_ARGS+=(--lightning); shift;;
+  --inspect) INSPECT="--inspect"; shift;;
   *) echo "unknown option: $1"; usage;;
 esac; done
 
@@ -57,21 +71,39 @@ for TASK in $TASKS; do
   echo "##### $PREFIX -> $RUN/  ($(date '+%F %T'))" | tee -a "$LOG"
   T0=$(date +%s); ok=1
   conda activate softmimicgen
-  if [ $ok = 1 ] && want 1; then stage 1 hdf5 bash docker/make_hdf5.sh "$TASK" "$TAG" "$N" "$GPU" || ok=0; fi
+  if [ $ok = 1 ] && want 1; then stage 1 hdf5 bash docker/make_hdf5.sh "$TASK" "$TAG" "$N" "$GPU" $INSPECT || ok=0; fi
   if [ $ok = 1 ] && want 2; then stage 2 source python $WC/make_source.py "$RUN" || ok=0; fi
   if [ $ok = 1 ] && want 3; then
     stage 3 "rgb canny" python $WC/make_rgb_canny.py "$RUN" || ok=0
     stage 3 "shaded canny" python $WC/make_shaded_canny.py "$RUN" || ok=0
     stage 3 "geo edge" python $WC/make_geo_edge.py "$RUN" || ok=0
+    stage 3 "shaded canny depth" python $WC/make_shaded_canny_depth.py "$RUN" || ok=0
+    stage 3 "union" python $WC/make_union.py "$RUN" || ok=0
+    stage 3 "shaded (inspection, only with --inspect)" python $WC/make_shaded.py "$RUN" || ok=0
+    stage 3 "geo inputs (inspection, only with --inspect)" python $WC/make_geo_inputs.py "$RUN" || ok=0
     conda activate "$RGB_EDGE_ENV"
     stage 3 "learned edges (rgb_edge env)" python $WC/make_learned_edges.py "$RUN" || ok=0
     conda activate softmimicgen
   fi
-  if [ $ok = 1 ] && want 4; then stage 4 wan python $WC/make_wan.py "$RUN" "${WAN_ARGS[@]}" || ok=0; fi
-  RESULT[$TASK]=$([ $ok = 1 ] && echo OK || echo FAILED)
+  need_ref=0
+  if [ $ok = 1 ] && want 4 && [ "$N_REF" -gt 0 ]; then
+    stage 4 "refs (Qwen-Image-Edit, $N_REF images)" python $WC/make_refs.py "$RUN" --n_ref "$N_REF" "${REF_ARGS[@]}" || ok=0
+  fi
+  if [ $ok = 1 ] && want 4; then
+    if [ -z "$REF" ] && ! compgen -G "$RUN/images/${PREFIX}_ref_ai*.png" > /dev/null; then
+      need_ref=1
+      echo "=== [$PREFIX] stage 4 skipped: NEED_REF. Make photorealistic versions of $RUN/images/${PREFIX}_ref_sim.png (same composition)," | tee -a "$LOG"
+      echo "    save them as $RUN/images/${PREFIX}_ref_ai.png or ${PREFIX}_ref_ai_01.png, _02.png, ..., then: bash docker/gen.sh $TASK $TAG --from 4" | tee -a "$LOG"
+    else
+      stage 4 wan python $WC/make_wan.py "$RUN" "${WAN_ARGS[@]}" || ok=0
+    fi
+  fi
+  RESULT[$TASK]=$([ $ok = 1 ] && { [ $need_ref = 1 ] && echo NEED_REF || echo OK; } || echo FAILED)
+  # the container runs as root: hand the run folder to the repo owner so the user can add/replace files from the host
+  chown -R --reference="$WC" "$RUN" 2>/dev/null || true
   echo "##### $PREFIX ${RESULT[$TASK]} in $(( ($(date +%s) - T0) / 60 )) min -> $RUN/" | tee -a "$LOG"
 done
 
 echo; echo "summary (tag $TAG):"; fail=0
-for TASK in $TASKS; do printf "  %-24s %s\n" "$TASK" "${RESULT[$TASK]}"; [ "${RESULT[$TASK]}" = OK ] || fail=1; done
+for TASK in $TASKS; do printf "  %-24s %s\n" "$TASK" "${RESULT[$TASK]}"; [ "${RESULT[$TASK]}" = FAILED ] && fail=1; done
 exit $fail

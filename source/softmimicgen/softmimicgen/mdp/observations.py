@@ -331,3 +331,193 @@ class GeoEdgeImage(ManagerTermBase):
             edge[:, -1] = False
             out[i, ..., 0] = edge.to(torch.uint8) * 255
         return out
+
+
+class ShadedCannyDepthImage(ManagerTermBase):
+    """Shaded-Canny edges OR depth-discontinuity edges, (num_envs, H, W, 1) uint8 {0, 255}.
+
+    The Canny half is exactly :class:`ShadedCannyImage` (same annotator graph, same thresholds); the depth half is
+    the depth rule of :class:`GeoEdgeImage` alone (right/lower neighbour differs by more than ``depth_jump`` metres;
+    normals and instance ids are not used). The annotators are the same templates the other two terms attach to
+    the same render product, so their shared nodes are reused untouched: the Canny-augmented annotator gets no
+    ``init_params`` (they would land on the Canny node) and ``instance_id_segmentation_fast`` is attached with
+    ``colorize=True``, the value ShadedCannyImage sets too. If ShadedCannyImage is registered on the same camera,
+    give both terms the same canny thresholds (the shared Canny node keeps the first ones it was created with).
+    Attach happens lazily on the first call so the camera's render products already exist.
+    """
+
+    def __init__(self, cfg, env):
+        super().__init__(cfg, env)
+        self._annots = None  # per render product: (canny-edge annotator, depth annotator)
+        self._warned_empty = False
+
+    def _attach(self, sensor, canny_low: int, canny_high: int):
+        import omni.replicator.core as rep
+
+        device = "cuda" if "cuda" in sensor.device else "cpu"
+        self._annots = []
+        for rp in sensor.render_product_paths:
+            edge = rep.AnnotatorRegistry.get_annotator("shaded_instance_id_segmentation", device=device).augment(
+                "Canny", thresholdLow=canny_low, thresholdHigh=canny_high, name="shaded_canny"
+            )
+            seg = rep.AnnotatorRegistry.get_annotator(
+                "instance_id_segmentation_fast", init_params={"colorize": True}, device=device
+            )
+            depth = rep.AnnotatorRegistry.get_annotator("distance_to_image_plane", device=device)
+            edge.attach(rp)
+            seg.attach(rp)
+            depth.attach(rp)
+            self._annots.append((edge, depth))
+
+    def __call__(
+        self,
+        env,
+        sensor_cfg: SceneEntityCfg,
+        canny_low: int = 10,
+        canny_high: int = 100,
+        depth_jump: float = 0.02,
+        inspect: bool = False,
+    ) -> torch.Tensor:
+        sensor = env.scene.sensors[sensor_cfg.name]
+        if self._annots is None:
+            self._attach(sensor, canny_low, canny_high)
+        height, width = sensor.image_shape
+        out = torch.zeros((env.num_envs, height, width, 1), dtype=torch.uint8, device=env.device)
+        for i, (a_edge, a_depth) in enumerate(self._annots):
+            raw = [a.get_data() for a in (a_edge, a_depth)]
+            raw = [r["data"] if isinstance(r, dict) else r for r in raw]  # segmentation-type annotators return dicts
+            if any(r is None or getattr(r, "size", 0) == 0 for r in raw):
+                if not self._warned_empty:
+                    print("[ShadedCannyDepthImage] annotators returned no data yet; emitting zeros for this call")
+                    self._warned_empty = True
+                continue
+            canny = convert_to_torch(raw[0], device=env.device)
+            canny = canny[..., 0] if canny.ndim == 3 else canny
+            canny = canny.reshape(height, width) > 0
+            d = convert_to_torch(raw[1], device=env.device).reshape(height, width).float()
+            finite = torch.isfinite(d)
+            if not bool(finite.all()):
+                fill = d[finite].max() if bool(finite.any()) else torch.zeros((), device=d.device)
+                d = torch.where(finite, d, fill)
+            edge = torch.zeros((height, width), dtype=torch.bool, device=env.device)
+            edge[:, :-1] |= (d[:, 1:] - d[:, :-1]).abs() > depth_jump  # right neighbour
+            edge[:-1, :] |= (d[1:, :] - d[:-1, :]).abs() > depth_jump  # lower neighbour
+            edge[0, :] = False
+            edge[-1, :] = False
+            edge[:, 0] = False
+            edge[:, -1] = False
+            out[i, ..., 0] = (canny | edge).to(torch.uint8) * 255
+        return out
+
+
+class ShadedSegImage(ManagerTermBase):
+    """The colourised shaded instance-id segmentation itself, the image ShadedCannyImage runs Canny on,
+    as (num_envs, H, W, 3) uint8 RGB. For inspection and reports, not a control signal.
+
+    Attaches the same shared nodes as :class:`ShadedCannyImage` (``shaded_instance_id_segmentation`` fed by
+    ``instance_id_segmentation_fast`` with ``colorize=True``) but reads the shade node's output directly, before
+    the Canny augmentation. No ``init_params`` are given to the shade node, so nothing shared is re-initialised.
+    Attach happens lazily on the first call so the camera's render products already exist.
+    """
+
+    def __init__(self, cfg, env):
+        super().__init__(cfg, env)
+        self._annots = None
+        self._warned_empty = False
+
+    def _attach(self, sensor):
+        import omni.replicator.core as rep
+
+        device = "cuda" if "cuda" in sensor.device else "cpu"
+        self._annots = []
+        for rp in sensor.render_product_paths:
+            shade = rep.AnnotatorRegistry.get_annotator("shaded_instance_id_segmentation", device=device)
+            seg = rep.AnnotatorRegistry.get_annotator(
+                "instance_id_segmentation_fast", init_params={"colorize": True}, device=device
+            )
+            shade.attach(rp)
+            seg.attach(rp)
+            self._annots.append(shade)
+
+    def __call__(self, env, sensor_cfg: SceneEntityCfg, inspect: bool = False) -> torch.Tensor:
+        sensor = env.scene.sensors[sensor_cfg.name]
+        if self._annots is None:
+            self._attach(sensor)
+        height, width = sensor.image_shape
+        out = torch.zeros((env.num_envs, height, width, 3), dtype=torch.uint8, device=env.device)
+        for i, annot in enumerate(self._annots):
+            data = annot.get_data()
+            data = data["data"] if isinstance(data, dict) else data
+            if data is None or getattr(data, "size", 0) == 0:
+                if not self._warned_empty:
+                    print("[ShadedSegImage] annotator returned no data yet; emitting zeros for this call")
+                    self._warned_empty = True
+                continue
+            t = convert_to_torch(data, device=env.device)
+            if t.ndim == 2:  # packed RGBA in one 32-bit value per pixel
+                t = t.view(torch.uint8).reshape(height, width, -1)
+            out[i] = t.reshape(height, width, -1)[..., :3].to(torch.uint8)
+        return out
+
+
+class GeoInputImage(ManagerTermBase):
+    """One input of :class:`GeoEdgeImage` as an 8-bit image, for inspection (not a control signal).
+
+    ``kind="depth"``: (num_envs, H, W, 1), distance_to_image_plane mapped linearly from 0..``max_depth`` metres to
+    0..255 (``max_depth`` defaults to the camera's far clipping plane; inf and anything beyond -> 255).
+    ``kind="normals"``: (num_envs, H, W, 3), normal xyz in -1..1 mapped to 0..255 (pixels without a surface -> 0).
+    ``kind="instance"``: (num_envs, H, W, 3), the colourised instance-id segmentation as RGB.
+    Attaches the same annotator template GeoEdgeImage uses for that input, so the shared node is reused with no
+    init_params. Attach happens lazily on the first call.
+    """
+
+    ANNOTATORS = {"depth": "distance_to_image_plane", "normals": "normals", "instance": "instance_id_segmentation_fast"}
+
+    def __init__(self, cfg, env):
+        super().__init__(cfg, env)
+        self._annots = None
+        self._warned_empty = False
+
+    def _attach(self, sensor, kind: str):
+        import omni.replicator.core as rep
+
+        device = "cuda" if "cuda" in sensor.device else "cpu"
+        self._annots = []
+        for rp in sensor.render_product_paths:
+            annot = rep.AnnotatorRegistry.get_annotator(self.ANNOTATORS[kind], device=device)
+            annot.attach(rp)
+            self._annots.append(annot)
+
+    def __call__(
+        self, env, sensor_cfg: SceneEntityCfg, kind: str = "depth", max_depth: float | None = None, inspect: bool = False
+    ) -> torch.Tensor:
+        if kind not in self.ANNOTATORS:
+            raise ValueError(f"kind must be one of {tuple(self.ANNOTATORS)}, got {kind!r}")
+        sensor = env.scene.sensors[sensor_cfg.name]
+        if self._annots is None:
+            self._attach(sensor, kind)
+        height, width = sensor.image_shape
+        channels = 1 if kind == "depth" else 3
+        out = torch.zeros((env.num_envs, height, width, channels), dtype=torch.uint8, device=env.device)
+        for i, annot in enumerate(self._annots):
+            data = annot.get_data()
+            data = data["data"] if isinstance(data, dict) else data
+            if data is None or getattr(data, "size", 0) == 0:
+                if not self._warned_empty:
+                    print(f"[GeoInputImage:{kind}] annotator returned no data yet; emitting zeros for this call")
+                    self._warned_empty = True
+                continue
+            t = convert_to_torch(data, device=env.device)
+            if kind == "depth":
+                d = t.reshape(height, width).float()
+                far = float(max_depth) if max_depth else float(sensor.cfg.spawn.clipping_range[1])
+                d = torch.where(torch.isfinite(d), d, torch.full_like(d, far))
+                out[i, ..., 0] = ((d / far).clamp(0.0, 1.0) * 255.0).round().to(torch.uint8)
+            elif kind == "normals":
+                n = t.reshape(height, width, -1)[..., :3].float()
+                out[i] = ((n.clamp(-1.0, 1.0) + 1.0) * 127.5).round().to(torch.uint8)
+            else:  # instance: colourised RGBA (packed 32-bit when the buffer comes as one value per pixel)
+                if t.ndim == 2:
+                    t = t.view(torch.uint8).reshape(height, width, -1)
+                out[i] = t.reshape(height, width, -1)[..., :3].to(torch.uint8)
+        return out

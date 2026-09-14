@@ -18,7 +18,7 @@ def run(rd):
         print(f"geo edge: {key} not in hdf5, skipped")
         return None
     frames = np.repeat(ge[sample_idx(len(ge))], 3, axis=-1)  # (N, H, W, 3), values unchanged
-    path = out_path(rd, "geoedge.mp4")
+    path = out_path(rd, "geoedge.mp4", "edges")
     imageio.mimsave(path, list(frames), fps=FPS, codec="libx264", pixelformat="yuv444p", output_params=["-qp", "0"])
 
     decoded = [fr for fr in imageio.get_reader(path)]

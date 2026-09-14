@@ -49,7 +49,7 @@ def run(rd) -> str:
     imgs = load_obs(rd.hdf5, rd.demo, rd.camera)
     imgs = imgs[sample_idx(len(imgs))]
     frames = [canny_frame(im) for im in imgs]
-    path = out_path(rd, "canny.mp4")
+    path = out_path(rd, "canny.mp4", "edges")
     # lossless (libx264 qp 0, 4:4:4): binary edge frames compress smaller than lossy and keep exact 0/255 values
     imageio.mimsave(path, frames, fps=FPS, codec="libx264", pixelformat="yuv444p", output_params=["-qp", "0"])
     print(

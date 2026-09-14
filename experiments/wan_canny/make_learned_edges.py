@@ -46,7 +46,7 @@ def run(rd, detectors=LE.DETECTORS, device: str | None = None, roi: str | None =
         maps, spf = LE.timed_soft_maps(name, imgs, device, detect_resolution=cfg["detect_resolution"], **cfg["opts"])
         lines = np.stack([LE.binarize(m, roi=r, **cfg["binarize"]) for m, r in zip(maps, rois)]).astype(np.uint8) * 255
         frames = np.repeat(lines[..., None], 3, axis=-1)
-        path = out_path(rd, f"{name}.mp4")
+        path = out_path(rd, f"{name}.mp4", "edges")
         imageio.mimsave(path, list(frames), fps=FPS, codec="libx264", pixelformat="yuv444p", output_params=["-qp", "0"])
         decoded = [fr for fr in imageio.get_reader(path)]
         ok = len(decoded) == len(frames) and all(np.array_equal(d, r) for d, r in zip(decoded, frames))

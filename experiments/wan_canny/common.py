@@ -1,7 +1,7 @@
 """Shared helpers for the wan_canny stage scripts: run-dir resolution, hdf5 loading, frame sampling, CLI.
 
 Every stage script takes one pipeline run folder  experiments/wan_canny/runs/<task>_<tag>/  (see tasks.py):
-it reads <prefix>.hdf5 there and writes its outputs next to it, prefix = folder name. --hdf5 / --prefix / --task
+it reads <prefix>.hdf5 there and writes its outputs into the sources/ edges/ images/ subfolders, prefix = folder name. --hdf5 / --prefix / --task
 override the defaults (e.g. to process an hdf5 that lives elsewhere)."""
 import argparse
 import os
@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import h5py
 import numpy as np
 
-from tasks import TASKS, task_of
+from tasks import SUBDIRS, TASKS, task_of
 
 N_FRAMES = 81  # Wan 2.2 clip length
 FPS = 16
@@ -47,9 +47,11 @@ def parse_args(description: str) -> SimpleNamespace:
     return resolve_run(a.run_dir, a.hdf5, a.prefix, a.task, a.demo)
 
 
-def out_path(rd: SimpleNamespace, suffix: str) -> str:
-    """<run_dir>/<prefix>_<suffix>"""
-    return os.path.join(rd.run_dir, f"{rd.prefix}_{suffix}")
+def out_path(rd: SimpleNamespace, suffix: str, sub: str) -> str:
+    """<run_dir>/<SUBDIRS[sub]>/<prefix>_<suffix>, creating the subfolder."""
+    d = os.path.join(rd.run_dir, SUBDIRS[sub])
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, f"{rd.prefix}_{suffix}")
 
 
 def load_obs(hdf5: str, demo: str, key: str):
