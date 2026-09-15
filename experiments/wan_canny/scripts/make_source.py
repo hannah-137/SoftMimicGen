@@ -1,6 +1,6 @@
 """Stage 2: source video and reference image. obs/<camera> -> <prefix>_source.mp4 + <prefix>_ref_sim.png (frame 0).
 
-  python experiments/wan_canny/make_source.py <run_dir> [--hdf5 H5] [--prefix P] [--task T] [--demo demo_0]
+  python experiments/wan_canny/scripts/make_source.py <run_dir> [--hdf5 H5] [--prefix P] [--task T] [--demo demo_0]
 """
 import cv2
 import imageio

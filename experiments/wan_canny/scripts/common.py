@@ -1,6 +1,6 @@
 """Shared helpers for the wan_canny stage scripts: run-dir resolution, hdf5 loading, frame sampling, CLI.
 
-Every stage script takes one pipeline run folder  experiments/wan_canny/runs/<task>_<tag>/  (see tasks.py):
+Every stage script takes one pipeline run folder  experiments/wan_canny/runs/<tag>/<task>_<tag>/  (see tasks.py):
 it reads <prefix>.hdf5 there and writes its outputs into the sources/ edges/ images/ subfolders, prefix = folder name. --hdf5 / --prefix / --task
 override the defaults (e.g. to process an hdf5 that lives elsewhere)."""
 import argparse
@@ -17,7 +17,7 @@ FPS = 16
 
 
 def add_run_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
-    parser.add_argument("run_dir", help="pipeline run folder experiments/wan_canny/runs/<task>_<tag>/ (holds <prefix>.hdf5, receives the outputs)")
+    parser.add_argument("run_dir", help="pipeline run folder experiments/wan_canny/runs/<tag>/<task>_<tag>/ (holds <prefix>.hdf5, receives the outputs)")
     parser.add_argument("--hdf5", default=None, help="generated dataset (default <run_dir>/<prefix>.hdf5)")
     parser.add_argument("--prefix", default=None, help="output file prefix (default: run_dir folder name)")
     parser.add_argument("--task", default=None, help="task key in tasks.TASKS (default: derived from the prefix)")

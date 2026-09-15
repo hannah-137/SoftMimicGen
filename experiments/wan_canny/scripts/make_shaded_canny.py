@@ -1,6 +1,6 @@
 """Stage 3b: Cosmos-style edges video. obs/<edges>_shadedcanny -> <prefix>_shadedcanny.mp4.
 
-  python experiments/wan_canny/make_shaded_canny.py <run_dir> [--hdf5 H5] [--prefix P] [--task T] [--demo demo_0]
+  python experiments/wan_canny/scripts/make_shaded_canny.py <run_dir> [--hdf5 H5] [--prefix P] [--task T] [--demo demo_0]
 
 The channel is produced inside the simulator by ShadedCannyImage (the CosmosWriter "edges" graph: Canny over the
 colorized shaded instance-id segmentation). Nothing is post-processed here: frames are sampled, replicated to

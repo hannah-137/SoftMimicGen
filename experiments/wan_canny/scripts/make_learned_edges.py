@@ -2,7 +2,7 @@
 
 Runs in the rgb_edge env (docker/setup_rgb_edge.sh), NOT in softmimicgen:
   source /opt/miniconda3/etc/profile.d/conda.sh && conda activate /workspace/tools/envs/rgb_edge
-  HF_HOME=/workspace/tools/rgb_edge_models python experiments/wan_canny/make_learned_edges.py <run_dir> \
+  HF_HOME=/workspace/tools/rgb_edge_models python experiments/wan_canny/scripts/make_learned_edges.py <run_dir> \
       [--hdf5 H5] [--prefix P] [--task T] [--demo demo_0] [--detectors hed,pidinet,teed,lineart] [--device cuda:N]
       [--roi hsv_blue|none]
 
@@ -13,12 +13,17 @@ threshold (lower inside the ROI) with NMS ridge thinning; TEED uses the plain th
 tasks.TASKS[task]["roi"] (hsv_blue = the blue towel) unless --roi is given.
 Same 81-frame sampling, 16 fps and lossless encoding as the other make_*.py scripts.
 """
-import argparse
+import os
 
-import imageio
-import numpy as np
+# shared server: this project may only use GPU 1 (docker/gpu.sh). Set before torch is imported, so cuda:0 below is GPU 1.
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
-import learned_edges as LE
+import argparse  # noqa: E402
+
+import imageio  # noqa: E402
+import numpy as np  # noqa: E402
+
+import learned_edges as LE  # noqa: E402
 from common import FPS, add_run_args, load_obs, out_path, resolve_run, sample_idx
 
 # binarize kwargs: threshold (everywhere), threshold_in (inside the ROI), nms_sigma, close_k, min_area
@@ -61,9 +66,11 @@ def run(rd, detectors=LE.DETECTORS, device: str | None = None, roi: str | None =
 if __name__ == "__main__":
     p = add_run_args(argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter))
     p.add_argument("--detectors", default=",".join(LE.DETECTORS), help="comma-separated subset of " + ",".join(LE.DETECTORS))
-    p.add_argument("--device", default=None, help="cuda:N or cpu; default = CUDA device with the most free memory")
+    p.add_argument("--device", default="cuda:0", help="cuda:0 (= GPU 1, the only visible GPU) or cpu")
     p.add_argument("--roi", default=None, choices=["hsv_blue", "none"],
                    help="region for the lower threshold (default: tasks.TASKS[task]['roi']); none = single threshold")
     a = p.parse_args()
     rd = resolve_run(a.run_dir, a.hdf5, a.prefix, a.task, a.demo)
+    if a.device.startswith("cuda") and a.device not in ("cuda", "cuda:0"):
+        p.error("only cuda:0 exists here (it is GPU 1); GPU 0 is not allowed")
     run(rd, [d.strip() for d in a.detectors.split(",") if d.strip()], a.device, a.roi)

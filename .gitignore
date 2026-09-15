@@ -84,3 +84,5 @@ experiments/*/*/edges/
 videos/
 logs/
 .pip_cache/
+experiments/*/legacy/
+experiments/*/sweeps/

@@ -2,7 +2,7 @@
 shaded Canny + depth, union (shaded Canny OR geometry edges) and, when the hdf5 was made with --inspect, the
 shaded segmentation and geometry-input (depth, normals, instance) videos.
 
-  python experiments/wan_canny/make_videos.py <run_dir> [--hdf5 H5] [--prefix P] [--task T] [--demo demo_0]
+  python experiments/wan_canny/scripts/make_videos.py <run_dir> [--hdf5 H5] [--prefix P] [--task T] [--demo demo_0]
 
 The learned edges (make_learned_edges.py, rgb_edge env) and the Wan videos (make_wan.py) are separate steps;
 docker/gen.sh chains everything. Each step is also runnable on its own."""

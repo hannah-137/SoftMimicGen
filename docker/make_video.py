@@ -18,7 +18,8 @@ with h5py.File(hdf5_path, "r") as f:
         obs = f["data"][demo]["obs"]
 
         # 이미지 관측 전부 찾기: (T, H, W, 3) uint8
-        cams = [k for k in obs.keys() if obs[k].ndim == 4 and obs[k].dtype == np.uint8]
+        # 1채널 엣지 채널(<cam>_shadedcanny 등)은 제외, RGB 카메라만
+        cams = [k for k in obs.keys() if obs[k].ndim == 4 and obs[k].dtype == np.uint8 and obs[k].shape[-1] == 3]
         if not cams:
             print(f"{demo}: no image obs, skip"); continue
         imgs = [obs[k][:] for k in cams]
@@ -36,7 +37,8 @@ with h5py.File(hdf5_path, "r") as f:
         print(f"{demo}: cameras {cams}")
 
         # 확대 (nearest neighbor, 픽셀 뭉개지지 않게)
-        frames = frames.repeat(SCALE, axis=1).repeat(SCALE, axis=2)
+        scale = max(1, SCALE * 128 // h)  # 작은 카메라만 확대 (512px 카메라는 그대로)
+        frames = frames.repeat(scale, axis=1).repeat(scale, axis=2)
 
         out_path = os.path.join(out_dir, f"{demo}.mp4")
         iio.imwrite(out_path, frames, fps=FPS, codec="libx264", plugin="pyav" if False else None)

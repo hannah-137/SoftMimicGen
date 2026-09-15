@@ -1,6 +1,6 @@
 """Stage 3c: geometry edges video. obs/<edges>_geoedge -> <prefix>_geoedge.mp4.
 
-  python experiments/wan_canny/make_geo_edge.py <run_dir> [--hdf5 H5] [--prefix P] [--task T] [--demo demo_0]
+  python experiments/wan_canny/scripts/make_geo_edge.py <run_dir> [--hdf5 H5] [--prefix P] [--task T] [--demo demo_0]
 
 The channel is produced inside the simulator by GeoEdgeImage (depth jump | normal angle | instance-id change between
 right/lower neighbours, 1 px lines, no Canny). Nothing is post-processed here: frames are sampled, replicated to

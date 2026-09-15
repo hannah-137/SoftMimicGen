@@ -1,7 +1,7 @@
 """Stage 3i: geometry-edge input videos (inspection only, not Wan controls).
 obs/<edges>_depth, _normals, _instance -> <prefix>_depth.mp4, _normals.mp4, _instance.mp4.
 
-  python experiments/wan_canny/make_geo_inputs.py <run_dir> [--hdf5 H5] [--prefix P] [--task T] [--demo demo_0]
+  python experiments/wan_canny/scripts/make_geo_inputs.py <run_dir> [--hdf5 H5] [--prefix P] [--task T] [--demo demo_0]
 
 The channels are the 8-bit views of GeoEdgeImage's three inputs recorded by GeoInputImage (only present when the
 hdf5 was generated with --inspect): depth (0..far plane -> 0..255, grey), normals (xyz -> RGB), colourised instance

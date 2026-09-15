@@ -1,6 +1,6 @@
 #!/bin/bash
 # Qwen-Image-Edit-2511 for ComfyUI (run inside the hyeon_smg container, after setup_comfyui.sh)
-# Used by experiments/wan_canny/make_refs.py to turn the simulator frame (images/<prefix>_ref_sim.png) into
+# Used by experiments/wan_canny/scripts/make_refs.py to turn the simulator frame (images/<prefix>_ref_sim.png) into
 # photorealistic reference images for Wan. Same ComfyUI server / conda env as Wan, models next to the Wan models.
 # Files (~31 GB): Comfy-Org repackaged fp8 diffusion model (20.5 GB), Qwen2.5-VL 7B fp8 text encoder (9.4 GB),
 # Qwen-Image VAE (0.25 GB), lightx2v Lightning 4-step LoRA (0.85 GB, optional fast path, --lightning in make_refs.py).
@@ -30,4 +30,4 @@ ln -sf $MODELS/loras/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors
 echo "=== Setup done ==="
 ls -la $C/diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors $C/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors \
       $C/vae/qwen_image_vae.safetensors $C/loras/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors
-echo "Web UI template: Templates -> 'Qwen-Image-Edit 2511'.  Pipeline: python experiments/wan_canny/make_refs.py <run_dir> --n_ref N"
+echo "Web UI template: Templates -> 'Qwen-Image-Edit 2511'.  Pipeline: python experiments/wan_canny/scripts/make_refs.py <run_dir> --n_ref N"

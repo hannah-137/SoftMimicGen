@@ -10,12 +10,34 @@ Tested on Ubuntu 24.04 host, RTX 4090 x2, NVIDIA driver 550.127.05, nvidia-conta
     docker exec -it <name> bash            # enter, then: conda activate softmimicgen
     bash docker/verify.sh                  # generate 2 rope demos and convert to mp4
 
+## Wan pipeline (inside the container)
+
+    bash docker/gen.sh franka_towel v7        # hdf5 -> source video + reference image -> 7 control videos -> 7 Wan videos
+    bash docker/gen.sh all v7 --from 2        # every task in experiments/wan_canny/scripts/tasks.py, skipping the hdf5 stage
+    bash docker/gen.sh all v7 --n_ref 10      # unattended: 10 Qwen-Image-Edit reference images per task, then Wan for each
+
+Everything for one run lands in `experiments/wan_canny/runs/<tag>/<task>_<tag>/` (one folder per tag): the hdf5 and logs at the root, then
+`sources/` (source and inspection videos), `edges/` (control videos), `images/` (reference images) and `wans/`
+(Wan videos + json). Stages can be run alone
+(`make_hdf5.sh <task> <tag>`, then the `experiments/wan_canny/make_*.py <run_dir>` scripts). GPU split: Isaac Sim
+renders on GPU 0 only (GPU 1 hangs at the first render on this machine), ComfyUI/Wan runs on GPU 1 and is started
+automatically by `make_wan.py` when it is not up. See `CLAUDE.md` for the layout and the task table.
+
 ## Files
 
 - `create_container.sh` – run on host. Creates the container and calls `container_setup.sh`.
 - `container_setup.sh` – runs inside the container. Installs libs, Vulkan/EGL config, miniconda, then `softmimicgen.sh`.
-- `verify.sh` – runs inside the container. Generates 2 rope demos on GPU 0 and writes mp4 to `docker/videos/`. Use this to check the environment works.
+- `verify.sh` – runs inside the container. Generates 2 rope demos on GPU 0 and writes mp4 to `videos/verify/`. Use this to check the environment works.
 - `make_video.py` – converts camera images in an hdf5 to mp4. Used by `verify.sh`.
+- `gen.sh` – runs inside the container. Whole Wan pipeline for one or more tasks (stages 1-4, per-task log and summary).
+- `make_hdf5.sh` – runs inside the container. Stage 1 only: one hdf5 into the run folder (interactive without arguments).
+- `comfy.sh` – run on host. Starts ComfyUI (port 8188, GPU 1) inside the container if it is not running; the web UI shares that server with the pipeline.
+- `setup_comfyui.sh` – runs inside the container. Installs ComfyUI (conda env `comfyui`) and the Wan 2.2 / 2.1 Fun-Control models under `/workspace/tools`.
+- `setup_rgb_edge.sh` – runs inside the container. Installs the soft-edge detector env (`/workspace/tools/envs/rgb_edge`: HED, PiDiNet, TEED, LineArt) and their weights.
+- `setup_gpu1.sh` – runs inside the container. Conda activation hooks that set `CUDA_VISIBLE_DEVICES=1` for the
+  softmimicgen, comfyui and rgb_edge envs (this project may only use GPU 1 on the shared server).
+- `setup_qwen_image_edit.sh` – runs inside the container after `setup_comfyui.sh`. Qwen-Image-Edit-2511 models (~31 GB) for
+  `experiments/wan_canny/scripts/make_refs.py` (automatic photorealistic reference images).
 
 ## Comparison with upstream README
 

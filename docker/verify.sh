@@ -11,16 +11,17 @@ VID="$REPO/videos/verify"
 source /opt/miniconda3/etc/profile.d/conda.sh
 conda activate softmimicgen
 cd "$REPO"
+source docker/gpu.sh
+stop_comfy_on_smg_gpu
 mkdir -p datasets/generated_dataset logs
 
-echo "=== [1/3] generate 2 rope demos (GPU 0) ==="
+echo "=== [1/3] generate 2 rope demos (GPU $SMG_GPU) ==="
 echo Yes | python scripts/imitation_learning/isaaclab_mimic/generate_dataset.py \
-  --device cuda:0 --num_envs 1 \
+  "${ISAAC_ARGS[@]}" --num_envs 1 \
   --generation_num_trials 2 \
   --input_file ./datasets/annotated_dataset/annotated_dataset_franka_rope.hdf5 \
   --output_file "$OUT" \
   --enable_cameras --headless \
-  --kit_args "--/renderer/multiGpu/enabled=false --/renderer/activeGpu=0" \
   2>&1 | tee logs/verify.txt
   [ -s "$OUT" ] || { echo "FAIL: generation produced no output"; exit 1; }
 

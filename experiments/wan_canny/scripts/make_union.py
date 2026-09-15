@@ -1,6 +1,6 @@
 """Stage 3g: union edges video. obs/<edges>_shadedcanny OR obs/<edges>_geoedge -> <prefix>_union.mp4.
 
-  python experiments/wan_canny/make_union.py <run_dir> [--hdf5 H5] [--prefix P] [--task T] [--demo demo_0]
+  python experiments/wan_canny/scripts/make_union.py <run_dir> [--hdf5 H5] [--prefix P] [--task T] [--demo demo_0]
 
 Pixel-wise OR of the two simulator edge channels (Cosmos-style shaded Canny and the geometry edges), so the video
 carries both the shading/fold lines of the first and the depth/normal/id boundaries of the second. No other

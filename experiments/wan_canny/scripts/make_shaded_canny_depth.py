@@ -1,6 +1,6 @@
 """Stage 3f: shaded Canny + depth edges video. obs/<edges>_shadedcanny_depth -> <prefix>_shadedcanny_depth.mp4.
 
-  python experiments/wan_canny/make_shaded_canny_depth.py <run_dir> [--hdf5 H5] [--prefix P] [--task T] [--demo demo_0]
+  python experiments/wan_canny/scripts/make_shaded_canny_depth.py <run_dir> [--hdf5 H5] [--prefix P] [--task T] [--demo demo_0]
 
 The channel is produced inside the simulator by ShadedCannyDepthImage (Cosmos-style shaded Canny OR depth
 discontinuities > depth_jump between right/lower neighbours). Nothing is post-processed here: frames are sampled,

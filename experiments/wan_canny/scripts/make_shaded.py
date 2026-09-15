@@ -1,6 +1,6 @@
 """Stage 3h: shaded segmentation video (inspection only, not a Wan control). obs/<edges>_shaded -> <prefix>_shaded.mp4.
 
-  python experiments/wan_canny/make_shaded.py <run_dir> [--hdf5 H5] [--prefix P] [--task T] [--demo demo_0]
+  python experiments/wan_canny/scripts/make_shaded.py <run_dir> [--hdf5 H5] [--prefix P] [--task T] [--demo demo_0]
 
 The channel is the colourised shaded instance-id segmentation recorded by ShadedSegImage, i.e. the image the shaded
 Canny is computed from. Nothing is post-processed here: frames are sampled, encoded losslessly (libx264rgb qp 0, exact RGB)

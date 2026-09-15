@@ -1,6 +1,6 @@
 """Stage 3a: RGB Canny control video. obs/<camera> -> <prefix>_canny.mp4.
 
-  python experiments/wan_canny/make_rgb_canny.py <run_dir> [--hdf5 H5] [--prefix P] [--task T] [--demo demo_0]
+  python experiments/wan_canny/scripts/make_rgb_canny.py <run_dir> [--hdf5 H5] [--prefix P] [--task T] [--demo demo_0]
 
 Pipeline on the rendered RGB frames: bilateral filter -> colour Canny (3-channel Sobel, per-pixel max-magnitude
 channel) -> close / small-blob removal, no dilation (1 px lines like the shaded-canny channel, Wan-Fun's own
