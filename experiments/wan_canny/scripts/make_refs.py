@@ -18,7 +18,7 @@ user put there (<prefix>_ref_ai.png or any other suffix) are never touched, both
 
 Prompt: tasks.REF_PROMPT, deliberately static (no task action words: "folds a towel" made the model fold the towel)
 and without colour words; image 1 is faithful to the frame, image k>1 gets tasks.ref_variation(k, seed): one entry
-per axis (environment, table, robot condition, lighting, camera look) plus a colour and material for the task's
+per axis (environment, table, robot condition, lighting) plus a colour and material for the task's
 manipulated object, drawn from the image's seed, so the N images differ in environment and object appearance
 while the layout stays fixed and a run is reproducible.
 --prompt overrides the whole instruction for every image.

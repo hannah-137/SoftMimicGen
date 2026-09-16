@@ -2,7 +2,7 @@
 built from the files and .json records in the run dir, uploaded through the Notion API. No LLM in the loop.
 
   python experiments/wan_canny/scripts/make_report.py <run_dir> [--parent PAGE_ID] [--title TEXT] [--icon EMOJI]
-      [--notes FILE] [--controls a,b] [--dry_run]
+      [--controls a,b] [--dry_run]
 
 Token: ~/.config/notion_token (an internal Notion integration, "access token" type, with the parent page shared to it).
 Parent: the CRAFT page by default.
@@ -10,7 +10,6 @@ Parent: the CRAFT page by default.
 Page (easy English, technical terms kept):
   intro, how it works, table of the kinds found in wans/, inputs (source video + one control video per channel),
   reference images with their image prompts, results (one section per kind: Wan prompt + one video per channel),
-  what we learned (lines of --notes FILE, else a placeholder), how to repeat (command + settings from the json).
 Kinds come from wans/<prefix>_wan_<control><suffix>.json: mode "ref" (reference image, suffix "" or _NN), "obj" (empty
 reference + object prompt, _oNN), "var" (no reference, prompt only, _pNN).
 Uploads go section by section and are attached right away (an unattached Notion upload expires after about an hour).
@@ -20,7 +19,6 @@ import glob
 import json
 import mimetypes
 import os
-import re
 import sys
 import time
 import urllib.error
@@ -128,10 +126,6 @@ def callout(text: str, emoji: str) -> dict:
     return {"type": "callout", "callout": {"rich_text": rt(text), "icon": {"type": "emoji", "emoji": emoji}}}
 
 
-def code(text: str, lang: str = "bash") -> dict:
-    return {"type": "code", "code": {"rich_text": rt(text), "language": lang}}
-
-
 def media(kind: str, upload_id: str, caption: str) -> dict:
     return {"type": kind, kind: {"type": "file_upload", "file_upload": {"id": upload_id}, "caption": rt(caption)}}
 
@@ -150,10 +144,9 @@ def table(rows: list[list[str]]) -> dict:
 
 
 # ----------------------------------------------------------------------------------------------------- run dir
-def ref_variation_text(prompt: str) -> str:
-    """The changing part of a make_refs.py prompt (between the fixed layout sentences and 'Change only ...')."""
-    m = re.search(r"reshape any of them\.\s*(.*?)\s*Change only", prompt, re.S)
-    return m.group(1) if m else prompt
+def prompt_text(rec: dict) -> str:
+    """Image prompt and negative exactly as sent to Qwen-Image-Edit (from the make_refs.py json), nothing cut."""
+    return f"Image prompt: {rec.get('prompt', '')}" + (f" | Negative: {rec['negative']}" if rec.get("negative") else "")
 
 
 def load_kinds(run_dir: str, prefix: str, controls_filter):
@@ -169,8 +162,8 @@ def load_kinds(run_dir: str, prefix: str, controls_filter):
         sample = sample or m
         ref = m.get("ref_image")
         ref = ref if not ref or os.path.isabs(ref) else os.path.join(REPO, ref)
-        k = kinds.setdefault(m.get("ref_suffix", ""), {"mode": m.get("mode", "ref"), "ref": ref,
-                                                        "prompt": m["prompt"], "videos": {}, "checks": {}})
+        k = kinds.setdefault(m.get("ref_suffix", ""), {"mode": m.get("mode", "ref"), "ref": ref, "prompt": m["prompt"],
+                                                        "negative": m.get("negative", ""), "videos": {}, "checks": {}})
         k["videos"][m["control"]] = mp4
         k["checks"][m["control"]] = (m.get("check") or {}).get("score"), m.get("attempt", 1)
     order = {"ref": 0, "obj": 1, "var": 2}
@@ -190,57 +183,8 @@ def label(suffix: str) -> str:
     return suffix.lstrip("_") or "ref"
 
 
-
-def rejected_blocks(run_dir: str, prefix: str, notion: "Notion") -> list:
-    """'Rejected' section: every rejected reference image and video with its score and reason, and every reference slot
-    that fell back to a prompt-only video. The files stay in images/rejected/ and wans/rejected/ of the run dir."""
-    d_img, d_wan = os.path.join(run_dir, SUBDIRS["images"]), os.path.join(run_dir, SUBDIRS["wans"])
-    out = [heading(2, "Rejected"),
-           para("These did not pass the check. They are not in the results above and not in the training data. "
-                "We keep them to see if the check is fair.")]
-    imgs = []
-    for png in sorted(glob.glob(os.path.join(d_img, "rejected", "*.png"))):
-        j = os.path.splitext(png)[0] + ".json"
-        m = json.load(open(j)) if os.path.isfile(j) else {}
-        chk = m.get("check") or {}
-        name = os.path.basename(png)[len(prefix) + 1:-4]
-        cap = (f"{name} | score {chk.get('score')} < {chk.get('threshold')} | mode {m.get('mode', '?')}, seed {m.get('seed', '?')}"
-               + (f" | {ref_variation_text(m['prompt'])}" if m.get("prompt") else ""))
-        imgs.append(media("image", notion.upload(png), cap))
-    out.append(heading(3, f"Reference images ({len(imgs)})"))
-    if imgs:
-        for i in range(0, len(imgs), 3):
-            out.append(columns(imgs[i:i + 3]))
-    else:
-        out.append(para("No reference image was rejected."))
-    fb = sorted(glob.glob(os.path.join(d_img, f"{prefix}_ref_*.fallback.json")))
-    out.append(heading(3, f"Reference slots that fell back ({len(fb)})"))
-    if fb:
-        for f in fb:
-            m = json.load(open(f))
-            tries = ", ".join(f"{t.get('mode')} seed {t.get('seed')}: {t.get('score', t.get('error'))}" for t in m.get("attempts", []))
-            out.append(bullet((f"slot {m.get('index')}", True), f": no image passed ({tries}). This slot became one extra prompt-only video."))
-    else:
-        out.append(para("Every reference slot got an image that passed."))
-    vids = []
-    for mp4 in sorted(glob.glob(os.path.join(d_wan, "rejected", "*.mp4"))):
-        j = os.path.splitext(mp4)[0] + ".json"
-        m = json.load(open(j)) if os.path.isfile(j) else {}
-        chk = m.get("check") or {}
-        name = os.path.basename(mp4)[len(prefix) + len("_wan_"):-4]
-        cap = (f"{name} | worst frame {chk.get('worst_frame')} score {chk.get('score')} < {chk.get('threshold')}"
-               f" | attempt {m.get('attempt', '?')}, seed {m.get('seed', '?')} | then made again with the next seed")
-        vids.append(media("video", notion.upload(mp4), cap))
-    out.append(heading(3, f"Videos ({len(vids)})"))
-    if vids:
-        for i in range(0, len(vids), 4):
-            out.append(columns(vids[i:i + 4]))
-    else:
-        out.append(para("No video was rejected."))
-    return out
-
 # ----------------------------------------------------------------------------------------------------- report
-def build(run_dir: str, notion: Notion, parent: str, title: str | None, icon: str, notes: str | None, controls_filter):
+def build(run_dir: str, notion: Notion, parent: str, title: str | None, icon: str, controls_filter):
     run_dir = os.path.normpath(run_dir)
     prefix = os.path.basename(run_dir)
     kinds, sample = load_kinds(run_dir, prefix, controls_filter)
@@ -299,7 +243,8 @@ def build(run_dir: str, notion: Notion, parent: str, title: str | None, icon: st
         if k["ref"] and k["ref"] not in [r for r, _ in refs]:
             refs.append((k["ref"], s))
     if refs:
-        blocks, imgs, fixed_prompt = [heading(2, "Reference images")], [], None
+        blocks, imgs = [heading(2, "Reference images"),
+                        para("Each caption has the full image prompt and negative, exactly as sent to Qwen-Image-Edit.")], []
         for path, s in refs:
             if not os.path.isfile(path):
                 continue
@@ -307,76 +252,65 @@ def build(run_dir: str, notion: Notion, parent: str, title: str | None, icon: st
             if rec is None:
                 cap = f"{label(s)}: user image. No AI record."
             elif kinds and dict(kinds)[s]["mode"] == "obj":
-                cap = f"empty: object removed by Qwen-Image-Edit. Used by {names(modes['obj'])}. Prompt: {rec['prompt']}"
+                cap = f"empty (used by {names(modes['obj'])}) | {prompt_text(rec)}"
             else:
-                cap = f"{label(s)}: {ref_variation_text(rec['prompt'])}"
-            if rec and rec.get("check"):
-                cap += f" | check {rec['check'].get('score')} ({rec.get('mode', '')}, attempt {rec.get('attempt', 1)})"
-                fixed_prompt = fixed_prompt or rec["prompt"]
+                cap = f"{label(s)} | {prompt_text(rec)}"
             imgs.append(media("image", notion.upload(path), cap))
         for i in range(0, len(imgs), 3):
             blocks.append(columns(imgs[i:i + 3]))
-        if fixed_prompt:
-            blocks.append(callout("Image prompt of the AI edits. Only the middle part changes per image: " +
-                                  re.sub(r"(reshape any of them\.\s*).*?(\s*Change only)", r"\1[variation]\2",
-                                         fixed_prompt, flags=re.S), "\U0001F4DD"))
         notion.append(page, blocks)
 
     # --- results: one section per kind
-    notion.append(page, [heading(2, "Results"),
+    notion.append(page, [para(("Wan negative prompt (the same for every video):", True)), quote(sample.get("negative", "")),
+                         heading(2, "Results"),
                          para(f"Each row is one kind. The {len(used)} videos in a row use the {len(used)} control videos.")])
     for s, k in kinds:
         ref = k["ref"]
         rec = ref_record(ref)
         if k["mode"] == "var":
-            head, intro_text = f"{label(s)} - no reference image", "No reference image. The prompt makes the whole look. Wan prompt:"
+            head, intro_text = f"{label(s)} - no reference image", "No reference image. The prompt makes the whole look."
         elif k["mode"] == "obj":
-            head, intro_text = f"{label(s)} - empty reference", "Reference image: empty scene. The prompt names the object. Wan prompt:"
+            head, intro_text = f"{label(s)} - empty reference", "Reference image: empty scene. The prompt names the object."
         elif rec is None:
-            head, intro_text = f"{label(s)} - user reference image", f"Reference image: {os.path.basename(ref)}. Wan prompt:"
+            head, intro_text = f"{label(s)} - user reference image", f"Reference image: {os.path.basename(ref)}."
         else:
-            head = f"{label(s)} - AI-edited reference"
-            intro_text = f"Reference image: {label(s)}. Image prompt part: \"{ref_variation_text(rec['prompt'])}\" Wan prompt:"
+            head, intro_text = f"{label(s)} - AI-edited reference", f"Reference image: {label(s)} (its image prompt is under Reference images)."
         def vcap(c):
-            score, attempt = k["checks"].get(c, (None, 1))
-            return c + (f" | check {score}" if score is not None else "") + (f" | attempt {attempt}" if attempt and attempt > 1 else "")
+            _, attempt = k["checks"].get(c, (None, 1))
+            return c + (f" | attempt {attempt}" if attempt and attempt > 1 else "")
         vids = [media("video", notion.upload(k["videos"][c]), vcap(c)) for c in used if c in k["videos"]]
-        notion.append(page, [heading(3, head), para(intro_text), quote(k["prompt"]), columns(vids)])
+        notion.append(page, [heading(3, head), para(intro_text), para(("Wan prompt:", True)), quote(k["prompt"]), columns(vids)])
 
-    # --- notes + how to repeat
+    notion.append(page, quality_blocks(run_dir, prefix, n_videos) + [settings_table(run_dir, prefix, sample)])
+    return page, notion.n_upload
+
+
+def settings_table(run_dir: str, prefix: str, sample: dict) -> dict:
+    """Wan settings shared by every video of the run (from the result json files)."""
+    secs = [json.load(open(p))["seconds"] for p in glob.glob(os.path.join(run_dir, SUBDIRS["wans"], f"{prefix}_wan_*.json"))]
+    return table([["Setting", "Value"],
+                  ["Video size", f"{sample['width']} x {sample['height']}, {sample['frames']} frames, {sample['fps']} fps"],
+                  ["Steps / cfg / shift", f"{sample['steps']} / {sample['cfg']} / {sample['shift']}"],
+                  ["Seed", f"{sample['seed']} for every video"],
+                  ["Time", f"{sum(secs) / max(len(secs), 1):.0f} s per video on average"],
+                  ["Template", sample["template"]]])
+
+
+def quality_blocks(run_dir: str, prefix: str, n_videos: int) -> list:
+    """'Quality check' section: what the check looks at and how many items it rejected (no scores)."""
     d_img, d_wan = os.path.join(run_dir, SUBDIRS["images"]), os.path.join(run_dir, SUBDIRS["wans"])
     rej_img = len(glob.glob(os.path.join(d_img, "rejected", "*.png")))
     rej_vid = len(glob.glob(os.path.join(d_wan, "rejected", "*.mp4")))
     fallbacks = len(glob.glob(os.path.join(d_img, f"{prefix}_ref_*.fallback.json")))
-    blocks = [{"type": "divider", "divider": {}}, heading(2, "Quality check"),
-              para("Every reference image and every video is checked against the simulator. The check compares the outlines "
-                   "of the robot and the object with the object borders from the simulator. The background is not checked, "
-                   "so it can change. The check looks at position only, not at image quality."),
-              table([["Item", "Count"],
-                     ["Videos in this report (all passed)", str(n_videos)],
-                     ["Reference images rejected (kept in images/rejected/)", str(rej_img)],
-                     ["Reference slots that fell back to a prompt-only video", str(fallbacks)],
-                     ["Videos rejected and made again (kept in wans/rejected/)", str(rej_vid)]]),
-              para("A reference image passes with score 0.80 or more (the empty reference: 0.40 or more). "
-                   "A video passes when its worst frame scores 0.60 or more.")]
-    blocks += rejected_blocks(run_dir, prefix, notion)
-    blocks.append(heading(2, "What we learned"))
-    lines = [ln.strip().lstrip("-* ").strip() for ln in open(notes)] if notes else []
-    lines = [ln for ln in lines if ln]
-    blocks += [bullet(ln) for ln in lines] if lines else [callout("Add notes here.", "✍️")]
-    secs = [json.load(open(p))["seconds"] for p in glob.glob(os.path.join(run_dir, SUBDIRS["wans"], f"{prefix}_wan_*.json"))]
-    cmd = (f"python experiments/wan_canny/scripts/make_wan.py {run_dir} \\\n    --controls {','.join(used)}"
-           + (f" --n_obj {len(modes['obj'])}" if modes["obj"] else "") + (f" --n_var {len(modes['var'])}" if modes["var"] else ""))
-    blocks += [heading(2, "How to repeat"), code(cmd), table([
-        ["Setting", "Value"],
-        ["Video size", f"{sample['width']} x {sample['height']}, {sample['frames']} frames, {sample['fps']} fps"],
-        ["Steps / cfg / shift", f"{sample['steps']} / {sample['cfg']} / {sample['shift']}"],
-        ["Seed", f"{sample['seed']} for every video"],
-        ["Time", f"{sum(secs) / max(len(secs), 1):.0f} s per video on average"],
-        ["Template", sample["template"]],
-    ]), para("Every video has a .json file next to it. It holds the prompt, the reference image, the seed and the time.")]
-    notion.append(page, blocks)
-    return page, notion.n_upload
+    return [{"type": "divider", "divider": {}}, heading(2, "Quality check"),
+            para("Every reference image and every video is checked against the simulator. The check compares the outlines "
+                 "of the robot and the object with the object borders from the simulator. The background is not checked, "
+                 "so it can change. The check looks at position only, not at image quality."),
+            table([["Item", "Count"],
+                   ["Videos in this report (all passed)", str(n_videos)],
+                   ["Reference images rejected (kept in images/rejected/)", str(rej_img)],
+                   ["Reference slots that fell back to a prompt-only video", str(fallbacks)],
+                   ["Videos rejected and made again (kept in wans/rejected/)", str(rej_vid)]])]
 
 
 if __name__ == "__main__":
@@ -385,12 +319,11 @@ if __name__ == "__main__":
     p.add_argument("--parent", default=CRAFT_PAGE, help="Notion parent page id (default: CRAFT)")
     p.add_argument("--title", default=None, help="page title (default: '<Task> <tag> - reference and prompt test')")
     p.add_argument("--icon", default="\U0001F3AC")
-    p.add_argument("--notes", default=None, help="text file, one 'what we learned' bullet per line")
     p.add_argument("--controls", default=None, help="only these controls (comma-separated)")
     p.add_argument("--dry_run", action="store_true", help="print the plan, upload nothing, create nothing")
     a = p.parse_args()
     token = "" if a.dry_run else open(TOKEN_FILE).read().strip()
-    page, n = build(a.run_dir, Notion(token, a.dry_run), a.parent, a.title, a.icon, a.notes,
+    page, n = build(a.run_dir, Notion(token, a.dry_run), a.parent, a.title, a.icon,
                     set(a.controls.split(",")) if a.controls else None)
     print(f"report: {n} files uploaded" + ("" if a.dry_run else f", page https://www.notion.so/{page.replace('-', '')}"))
     sys.exit(0)

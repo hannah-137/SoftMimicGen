@@ -26,28 +26,29 @@ SUBDIRS = {
 # control-video suffixes in pipeline order; make_wan.py makes one Wan video per suffix that exists in the run dir
 CONTROLS = ["canny", "shadedcanny", "geoedge", "shadedcanny_depth", "union", "hed", "pidinet", "teed", "lineart"]
 
-# ComfyUI Wan 2.2 Fun-Control template default negative prompt
+# ComfyUI Wan 2.2 Fun-Control template default negative prompt, without "背景人很多" (many people in the background):
+# prompts and negatives mention no people at all (2026-09-15)
 NEGATIVE_PROMPT = (
     "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，"
     "丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，"
-    "杂乱的背景，三条腿，背景人很多，倒着走"
+    "杂乱的背景，三条腿，倒着走"
 )
 
-_TAIL = ", laboratory scene, realistic video, static camera"  # appended to every scene -> Wan prompt
+_TAIL = ", realistic video, static camera"  # appended to every scene -> Wan prompt (no "laboratory scene": the reference image sets the room, 2026-09-15)
 
 # make_refs.py: edit instruction for Qwen-Image-Edit that turns the simulator frame into a photorealistic reference
 # image. Deliberately static: no task scene or action words ("folds a towel" made the model fold the towel, 2026-09-13)
 # and, like the Wan prompt, no colour or material words. {variation} is filled by ref_variation().
 REF_PROMPT = (
-    "Turn this computer-generated rendering into a real photograph. Keep the exact same camera viewpoint and framing, "
+    "Turn this simulator image into a realistic real-world scene. Keep the exact same camera viewpoint and framing, "
     "the same robot in the same pose, and the same {object} and every other object in exactly the same position with "
     "the same shape, size and orientation. Do not add, remove, move, fold, bend or reshape any of them. "
     "There is exactly one {object}. {variation} "
-    "Change only the materials, textures and lighting so it looks like a real photo."
+    "Change only the materials, textures and lighting so it looks like a real-world scene."
 )
 # Variation of reference image k: one entry per axis below, drawn with random.Random(seed_k) (seed_k = --seed + k - 1),
 # joined into one sentence block (see ref_variation). Image 1 of a run is always the faithful one (REF_FAITHFUL).
-# Layout stays fixed by REF_PROMPT; these change environment, table, robot condition, lighting, camera look and the
+# Layout stays fixed by REF_PROMPT; these change environment, table, robot condition, lighting and the
 # manipulated object's colour and material.
 # Object colour/material is varied here on purpose: the reference image is what defines the colours for Wan (the Wan
 # prompt itself stays colour-free so it does not fight the reference).
@@ -57,9 +58,9 @@ REF_NEGATIVE = ("CGI, 3D render, cartoon, illustration, painting, blurry, low qu
 # background stay anchored by this image while the Wan prompt sets the object colour/material (make_wan.py --n_obj).
 REF_EMPTY_PROMPT = (
     "Remove the {object} from the table completely so the table top is bare and empty, then turn this "
-    "computer-generated rendering into a real photograph. Keep the exact same camera viewpoint and framing, the same "
+    "simulator image into a realistic real-world scene. Keep the exact same camera viewpoint and framing, the same "
     "robot in the same pose, the same table and the plain background exactly where they are. Do not add any objects. "
-    "Change only the materials, textures and lighting so it looks like a real photo."
+    "Change only the materials, textures and lighting so it looks like a real-world scene."
 )
 REF_FAITHFUL = "Keep the plain, empty background and the bare table as they are; do not add any objects, furniture or clutter."
 # generic colour list for the manipulated object (a task may override with colours=[...] in TASKS)
@@ -82,7 +83,7 @@ REF_AXES = {
         "The scene is a hospital room with medical equipment behind.",
         "The scene is a living room with a sofa and bookshelf in the background.",
         "The scene is a makerspace with 3D printers and shelves behind.",
-        "The scene is an outdoor tent at a robotics competition with people and banners far behind.",
+        "The scene is an outdoor tent at a robotics competition with banners far behind.",
         "The scene is a server room with racks of equipment behind.",
         "The scene is a loft with exposed brick walls and large windows.",
         "The scene is a cafeteria with tables and chairs far behind.",
@@ -103,10 +104,8 @@ REF_AXES = {
     "robot": [
         "The robot is brand new and spotless.",
         "The robot looks well used, with slight scuffs, dust and worn paint.",
-        "The robot shows light fingerprints and smudges.",
-        "The robot has small labels and stickers on its links.",
         "The robot is dusty and slightly scratched.",
-        "The robot has visible cables tied along its arm.",
+        # no stickers or cables: they add things the real robot does not have (removed 2026-09-15)
     ],
     "lighting": [
         "Soft daylight comes from a window on the left.",
@@ -118,14 +117,8 @@ REF_AXES = {
         "Diffuse ceiling light, almost no shadows.",
         "Mixed lighting: warm lamp plus cool daylight.",
     ],
-    "camera": [
-        "Sharp, professional photograph.",
-        "Slightly grainy photo taken with a phone camera.",
-        "Photo with shallow depth of field, the background softly blurred.",
-        "Slightly high-contrast photo.",
-        "Flat, low-contrast photo.",
-        "Photo with mild lens vignetting.",
-    ],
+    # no camera-look axis (grainy phone photo, blurred background, vignetting, ...): photo effects are not what a
+    # robot camera records (removed 2026-09-15)
 }
 
 
@@ -138,7 +131,7 @@ TASKS = {
         roi="hsv_blue",  # learned_edges ROI for the lower threshold (blue towel); "none" for other objects
         scene="A Franka robot arm folds {object} on a table",  # {object} = object_default, or object_shape with a colour/material look
         object_default="a single towel", object_shape="a single thin flat {look} towel lying spread out",
-        negative_extra="multiple towels, stacked towels, double layer, folded edge",
+        negative_extra="multiple towels, stacked towels, double layer",
         object="towel", materials=["terry cloth", "microfiber", "linen", "waffle-weave cotton", "fleece"],
     ),
     "franka_rope": dict(
@@ -193,7 +186,7 @@ TASKS = {
         roi="none",
         scene="Two YAM robot arms fold {object} on a workstation table",  # {object} = object_default, or object_shape with a colour/material look
         object_default="a single towel", object_shape="a single thin flat {look} towel lying spread out",
-        negative_extra="multiple towels, stacked towels, double layer, folded edge",
+        negative_extra="multiple towels, stacked towels, double layer",
         object="towel", materials=["terry cloth", "microfiber", "linen", "waffle-weave cotton", "fleece"],
         variation="weak",  # the workstation was replaced by industrial arms under full variation (2026-09-14)
     ),
@@ -239,8 +232,8 @@ def ref_variation(k: int, seed: int, task: str, mode: str | None = None) -> str:
     random.Random(f"{task}:{seed + k - 1}"), one entry per REF_AXES axis plus a colour and material for the task's
     manipulated object (TASKS[task]["object"], "materials", optional "colours"), so a run is reproducible, every image
     differs, and image k of different tasks gets different combinations.
-    TASKS[task]["variation"] = "weak" keeps the background and table faithful (REF_FAITHFUL) and varies only lighting,
-    camera look and the object: scenes with little structure (a rope on a bare table) get re-composed by
+    TASKS[task]["variation"] = "weak" keeps the background and table faithful (REF_FAITHFUL) and varies only lighting
+    and the object: scenes with little structure (a rope on a bare table) get re-composed by
     environment/table sentences (2026-09-14, franka_rope), whereas towel scenes keep their layout under "full"."""
     if k == 1:
         return REF_FAITHFUL
@@ -270,7 +263,7 @@ def wan_object_prompt(task: str, k: int, seed: int) -> str:
 
 def wan_variation_prompt(task: str, k: int, seed: int) -> str:
     """Wan prompt for make_wan.py --n_var (no reference image, CRAFT's background augmentation): scene with the object
-    look plus one sentence per REF_AXES axis (environment, table, robot condition, lighting, camera look)."""
+    look plus one sentence per REF_AXES axis (environment, table, robot condition, lighting)."""
     rng = random.Random(f"var:{task}:{seed + k - 1}")
     cfg = TASKS[task]
     scene = cfg["scene"].format(object=cfg["object_shape"].format(look=object_look(task, k, seed)))
