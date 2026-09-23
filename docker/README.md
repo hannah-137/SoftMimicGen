@@ -38,6 +38,10 @@ automatically by `make_wan.py` when it is not up. See `CLAUDE.md` for the layout
   softmimicgen, comfyui and rgb_edge envs (this project may only use GPU 1 on the shared server).
 - `setup_qwen_image_edit.sh` – runs inside the container after `setup_comfyui.sh`. Qwen-Image-Edit-2511 models (~31 GB) for
   `experiments/wan_canny/scripts/make_refs.py` (automatic photorealistic reference images).
+- `setup_jupyter.sh` – runs inside the container. Adds `jupyter-server` + `ipykernel` to the softmimicgen env and registers
+  the kernel `softmimicgen (GPU 1)`; no new env.
+- `jupyter.sh` – run on host. Starts a Jupyter server (port 8888, GPU 1) inside the container if it is not running and prints
+  the URL for VSCode "Existing Jupyter Server" (`bash docker/jupyter.sh [root_dir]`, `bash docker/jupyter.sh stop`).
 
 ## Comparison with upstream README
 
