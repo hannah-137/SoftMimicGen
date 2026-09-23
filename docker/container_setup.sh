@@ -6,6 +6,10 @@ export DEBIAN_FRONTEND=noninteractive
 
 REPO="/workspace/${REPO_NAME:-SoftMimicGen}"
 [ -d "$REPO" ] || { echo "[!] repo not found at $REPO"; exit 1; }
+# Temp files (pip wheel unpacking ~7 GB, dpkg postinst mktemp) go to /workspace, not the container layer. Must exist
+# before apt runs: create_container.sh passes TMPDIR to every process, and dpkg scripts use it from the first install.
+export TMPDIR=/workspace/tools/.tmp
+mkdir -p "$TMPDIR"
 
 echo "=== [1/6] system libraries ==="
 apt-get update
@@ -38,8 +42,6 @@ MC=/workspace/tools/miniconda3
 mkdir -p /workspace/tools /workspace/tools/root_cache
 [ -e /opt/miniconda3 ] || ln -s "$MC" /opt/miniconda3
 [ -e /root/.cache ] || ln -s /workspace/tools/root_cache /root/.cache
-export TMPDIR=/workspace/tools/.tmp   # pip unpacks wheels here (Isaac Sim ~7 GB), not in the container layer
-mkdir -p "$TMPDIR"
 if [ -x /opt/miniconda3/bin/conda ]; then
   echo "already installed, skipping"
 else

@@ -42,6 +42,7 @@ if docker ps -a --format '{{.Names}}' | grep -qx "$NAME"; then
 fi
 
 echo "[1/3] creating container: $NAME  ($DATA_DIR -> /workspace)"
+mkdir -p "$DATA_DIR/tools/.tmp"   # TMPDIR inside the container; must exist before the first apt/dpkg run
 docker run -d --gpus all \
   -e NVIDIA_VISIBLE_DEVICES=all \
   -e NVIDIA_DRIVER_CAPABILITIES=all \
