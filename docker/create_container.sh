@@ -46,6 +46,7 @@ docker run -d --gpus all \
   -e NVIDIA_VISIBLE_DEVICES=all \
   -e NVIDIA_DRIVER_CAPABILITIES=all \
   -e ACCEPT_EULA=Y \
+  -e TMPDIR=/workspace/tools/.tmp \
   -e REPO_NAME="$REPO_NAME" \
   --name "$NAME" \
   -v "$DATA_DIR":/workspace \

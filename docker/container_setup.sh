@@ -38,6 +38,8 @@ MC=/workspace/tools/miniconda3
 mkdir -p /workspace/tools /workspace/tools/root_cache
 [ -e /opt/miniconda3 ] || ln -s "$MC" /opt/miniconda3
 [ -e /root/.cache ] || ln -s /workspace/tools/root_cache /root/.cache
+export TMPDIR=/workspace/tools/.tmp   # pip unpacks wheels here (Isaac Sim ~7 GB), not in the container layer
+mkdir -p "$TMPDIR"
 if [ -x /opt/miniconda3/bin/conda ]; then
   echo "already installed, skipping"
 else
