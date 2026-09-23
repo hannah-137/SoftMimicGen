@@ -17,6 +17,7 @@ conda activate comfyui
 # 2. ComfyUI
 mkdir -p $TOOLS && cd $TOOLS
 [ -d ComfyUI ] || git clone https://github.com/comfyanonymous/ComfyUI.git
+git -C ComfyUI checkout -q 1d48d9cf   # pin to the commit used on smg (2026-09-10); change here to upgrade
 cd ComfyUI
 
 # 3. torch cu128 first (ComfyUI needs newer torch than cu124 build; cu128 works on driver 550)
