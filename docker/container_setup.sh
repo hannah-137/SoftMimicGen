@@ -30,13 +30,20 @@ else
   exit 1
 fi
 
-echo "=== [4/6] miniconda ==="
+echo "=== [4/6] miniconda (installed on /workspace, i.e. the host data disk, not in the container layer) ==="
+# The container layer lives on the host root disk, which can be small on a shared server (barista: 868 GB, 99% full).
+# miniconda + conda envs (~30 GB) and /root/.cache (pip/hf/Isaac Sim caches) go to /workspace/tools instead;
+# /opt/miniconda3 stays as a symlink so every script and .bashrc keeps its path. Existing installs are left untouched.
+MC=/workspace/tools/miniconda3
+mkdir -p /workspace/tools /workspace/tools/root_cache
+[ -e /opt/miniconda3 ] || ln -s "$MC" /opt/miniconda3
+[ -e /root/.cache ] || ln -s /workspace/tools/root_cache /root/.cache
 if [ -x /opt/miniconda3/bin/conda ]; then
   echo "already installed, skipping"
 else
-  wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh
-  bash /tmp/miniconda.sh -b -p /opt/miniconda3
-  rm /tmp/miniconda.sh
+  wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /workspace/tools/miniconda.sh
+  bash /workspace/tools/miniconda.sh -b -p "$MC"
+  rm /workspace/tools/miniconda.sh
 fi
 export PATH=/opt/miniconda3/bin:$PATH
 conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main

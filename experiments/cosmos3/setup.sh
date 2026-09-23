@@ -29,7 +29,8 @@ need=""
 for p in ffmpeg git-lfs libx11-dev; do dpkg -s "$p" >/dev/null 2>&1 || need="$need $p"; done
 if [ -n "$need" ]; then
   echo "=== apt install:$need"
-  apt-get update && apt-get install -y --no-install-recommends $need
+  apt-get update                                        # separate lines so a failure stops the script (set -e ignores the left side of &&)
+  apt-get install -y --no-install-recommends $need
 fi
 
 # 2. uv (installer respects UV_INSTALL_DIR) and the hf CLI
