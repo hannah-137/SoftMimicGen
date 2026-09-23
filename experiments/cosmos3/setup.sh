@@ -38,9 +38,10 @@ uv --version
 command -v hf >/dev/null 2>&1 || uv tool install huggingface_hub
 hf version
 
-# 3. cosmos-framework source (shallow clone; the commit is recorded for the report)
+# 3. cosmos-framework source, pinned to the commit used on smg (2026-09-18); change the hash here to upgrade
 FW="$TOOLS/cosmos-framework"
-[ -d "$FW/.git" ] || git clone --depth 1 https://github.com/NVIDIA/cosmos-framework.git "$FW"
+[ -d "$FW/.git" ] || git clone https://github.com/NVIDIA/cosmos-framework.git "$FW"
+git -C "$FW" checkout -q c23e51f2f157ae3e51cfcd86ebfb5464850894f2
 cd "$FW"
 git rev-parse HEAD | tee COMMIT.txt
 
