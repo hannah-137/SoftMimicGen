@@ -3,11 +3,12 @@
   python experiments/policy_data/run_cosmos.py <run_dir> --framework <cosmos-framework dir> \
       --checkpoint <Cosmos3 checkpoint dir> --gpus 2,3 [--cp 2] [--port 29511] [--demos 0 1]
 
-Input per demo: <run_dir>/videos/geoedge/demo_NNN.mp4 (control video) and <run_dir>/refs_checked/demo_NNN.png
-(reference image, written by check_references.py). Run check_references.py first. This script refuses to start
-when check_references.csv is missing or lists a failed demo (--skip_check overrides). Without --demos it takes
-every demo that passed. Cosmos keeps the reference image as frame 0 and follows the edge video.
-Output: <run_dir>/cosmos/<name>/demo_NNN/vision.mp4, plus the spec json, the reference video and the log.
+Input: <run_dir>/videos/geoedge/demo_NNN.mp4 (control video) and the reference images in <run_dir>/refs_checked/
+(demo_NNN_<tag>.png or demo_NNN.png, written by check_references.py). One video per reference image.
+Run check_references.py first. This script refuses to start when check_references.csv is missing or lists a
+failed image (--skip_check overrides). Without --demos it takes every image that passed. Cosmos keeps the
+reference image as frame 0 and follows the edge video.
+Output: <run_dir>/cosmos/<name>/<reference name>/vision.mp4, plus the spec json, the reference video and the log.
 
 Settings are the ones of the earlier tests: resolution 480 tier (patched to 1024x512), 81 frames, 16 fps,
 35 steps, guidance 3, control guidance 3, shift 5, seed 0. The framework's default negative prompt is used.
@@ -49,26 +50,30 @@ def spec(name: str, control: str, ref: str, prompt: str, seed: int, steps: int) 
     }
 
 
-def checked_demos(run_dir: str, wanted: list | None, skip_check: bool) -> list:
-    """Demo indices to run: the ones that passed check_references.py (or the wanted ones, all must have passed)."""
+def checked_references(run_dir: str, wanted: list | None, skip_check: bool) -> list:
+    """(demo index, reference name) pairs to run: the images that passed check_references.py."""
     path = f"{run_dir}/check_references.csv"
     if skip_check:
         if wanted is None:
             sys.exit("--skip_check needs --demos")
-        return wanted
+        pairs = []
+        for i in wanted:
+            names = sorted(os.path.basename(f)[: -len(".png")] for f in glob.glob(f"{run_dir}/refs_checked/demo_{i:03d}*.png"))
+            pairs += [(i, n) for n in names]
+        return pairs
     if not os.path.isfile(path):
         sys.exit(f"{path} not found: run check_references.py first (or use --skip_check with --demos)")
     rows = list(csv.DictReader(open(path)))
-    passed = {int(r["demo"]) for r in rows if r["passed"] == "True"}
-    failed = {int(r["demo"]) for r in rows} - passed
+    failed = [r["name"] for r in rows if r["passed"] != "True"]
+    passed = [(int(r["demo"]), r["name"]) for r in rows if r["passed"] == "True"]
     if wanted is None:
         if failed:
             sys.exit(f"{len(failed)} reference images failed the check: see {run_dir}/failed_references.txt")
-        return sorted(passed)
-    bad = [i for i in wanted if i not in passed]
+        return passed
+    bad = [n for n in failed if int(n.split("_")[1]) in wanted]
     if bad:
-        sys.exit(f"demos {bad} did not pass the reference check: see {run_dir}/failed_references.txt")
-    return wanted
+        sys.exit(f"references {bad} did not pass the check: see {run_dir}/failed_references.txt")
+    return [(i, n) for i, n in passed if i in wanted]
 
 
 def framework_env(fw: str) -> dict:
@@ -104,24 +109,25 @@ def main():
     if not args.hf_home:
         sys.exit("set --hf_home (or HF_HOME): the Hugging Face cache folder of the framework")
     run_dir = os.path.abspath(args.run_dir)
-    demos = checked_demos(run_dir, args.demos, args.skip_check)
+    pairs = checked_references(run_dir, args.demos, args.skip_check)
+    if not pairs:
+        sys.exit("no reference images to run")
     name = args.name or os.path.basename(os.path.normpath(args.checkpoint))
     out = f"{run_dir}/cosmos/{name}"
     os.makedirs(f"{out}/specs", exist_ok=True)
     os.makedirs(f"{out}/refs", exist_ok=True)
     specs = []
-    for idx in demos:
-        demo = f"demo_{idx:03d}"
-        control = f"{run_dir}/videos/geoedge/{demo}.mp4"
-        ref = f"{run_dir}/refs_checked/{demo}.png"
+    for idx, name in pairs:
+        control = f"{run_dir}/videos/geoedge/demo_{idx:03d}.mp4"
+        ref = f"{run_dir}/refs_checked/{name}.png"
         for path in (control, ref):
             if not os.path.isfile(path):
                 sys.exit(f"missing: {path}")
-        ref_mp4 = f"{out}/refs/{demo}.mp4"
+        ref_mp4 = f"{out}/refs/{name}.mp4"
         ref_video(ref, ref_mp4, frames=81, fps=16)
-        path = f"{out}/specs/{demo}.json"
+        path = f"{out}/specs/{name}.json"
         with open(path, "w") as f:
-            json.dump(spec(demo, control, ref_mp4, args.prompt, args.seed, args.steps), f, indent=1)
+            json.dump(spec(name, control, ref_mp4, args.prompt, args.seed, args.steps), f, indent=1)
         specs.append(path)
 
     n_gpu = len(args.gpus.split(","))
@@ -138,7 +144,7 @@ def main():
         return
     with open(f"{out}/run.log", "w") as log:
         rc = subprocess.run(cmd, cwd=os.path.abspath(args.framework), env=env, stdout=log, stderr=subprocess.STDOUT).returncode
-    videos = [f"{out}/demo_{i:03d}/vision.mp4" for i in demos]
+    videos = [f"{out}/{name}/vision.mp4" for _, name in pairs]
     done = [v for v in videos if os.path.isfile(v)]
     print(f"[run_cosmos] exit {rc}, {len(done)}/{len(videos)} videos in {out} (log: {out}/run.log)")
     sys.exit(0 if rc == 0 and len(done) == len(videos) else 1)

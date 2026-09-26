@@ -2,8 +2,9 @@
 
   python experiments/policy_data/check_references.py <run_dir> [--refs <folder>] [--no_layout]
 
-Input: <run_dir>/refs/demo_NNN.png, one image per demo, and the demo hdf5 in <run_dir>.
-Every demo in the hdf5 needs an image. A missing image is a failure.
+Input: <run_dir>/refs/demo_NNN_<tag>.png (several images per demo, one video per image later) or
+<run_dir>/refs/demo_NNN.png (one image), and the demo hdf5 in <run_dir>. Every demo in the hdf5 needs at least one
+image. A demo without an image is a failure ("missing").
 
 Check 1, size: the image must have the 2:1 aspect of the tiled view (room | wrist). Then it is resized to 1024 x 512
 and saved as <run_dir>/refs_checked/demo_NNN.png. A different aspect is a failure (make the image again).
@@ -14,15 +15,17 @@ towel) counts. Room and wrist views are scored separately. Pass: both >= 0.70.
 Calibration (Franka towel, 2026-09-26): simulator frame 0.91 / 0.98, the same frame resized 0.85 / 0.99, earlier
 ChatGPT references 0.86-1.00, mirrored image 0.55 / 0.41, towel removed 0.38 in the wrist view.
 
-Output: <run_dir>/check_references.csv (all demos), <run_dir>/failed_references.txt (demos to make again, with the
-reason), <run_dir>/check_references/demo_NNN.png (image with the simulator outline drawn, only for failures).
-Exit code 1 when any demo fails.
+Output: <run_dir>/check_references.csv (one row per image), <run_dir>/failed_references.txt (images to make again,
+with the reason), <run_dir>/check_references/<name>.png (image with the simulator outline drawn, only for failures),
+<run_dir>/refs_checked/<name>.png (resized copies of the images that passed). Exit code 1 when anything fails.
 """
 
 import argparse
 import csv
+import glob
 import json
 import os
+import re
 import sys
 
 import cv2
@@ -142,21 +145,28 @@ def main():
         room_key, wrist_key = camera_keys(h5["data"][demos[0]]["obs"])
         for key in demos:
             idx = int(key.split("_")[-1])
-            name = f"demo_{idx:03d}"
-            src = f"{refs}/{name}.png"
-            row = {"demo": idx, "file": src, "width": 0, "height": 0, "size_ok": False, "room_score": "", "wrist_score": "", "passed": False, "reason": ""}
-            if not os.path.isfile(src):
-                row["reason"] = "missing"
-            else:
+            demo = f"demo_{idx:03d}"
+            files = sorted(f for f in glob.glob(f"{refs}/{demo}*.png") if re.fullmatch(rf"{demo}(_[^/]+)?\.png", os.path.basename(f)))
+            if not files:
+                rows.append({"demo": idx, "name": demo, "file": "", "width": 0, "height": 0, "size_ok": False,
+                             "room_score": "", "wrist_score": "", "passed": False, "reason": "missing"})
+                failed.append(f"{demo}: missing")
+                print(f"{demo}: FAIL missing", flush=True)
+                continue
+            sim = None
+            for src in files:
+                name = os.path.basename(src)[: -len(".png")]
+                row = {"demo": idx, "name": name, "file": src, "width": 0, "height": 0, "size_ok": False, "room_score": "", "wrist_score": "", "passed": False, "reason": ""}
                 img, w, h, reason = load_and_resize(src)
                 row.update(width=w, height=h, size_ok=img is not None, reason=reason)
                 if img is not None:
-                    cv2.imwrite(f"{run}/refs_checked/{name}.png", cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
                     if args.no_layout:
                         row["passed"] = True
                     else:
-                        obs = h5["data"][key]["obs"]
-                        (ol_r, reg_r), (ol_w, reg_w) = sim_frame0(obs, room_key, tables.get(room_key)), sim_frame0(obs, wrist_key, tables.get(wrist_key))
+                        if sim is None:
+                            obs = h5["data"][key]["obs"]
+                            sim = sim_frame0(obs, room_key, tables.get(room_key)), sim_frame0(obs, wrist_key, tables.get(wrist_key))
+                        (ol_r, reg_r), (ol_w, reg_w) = sim
                         s_r = layout_score(ol_r, img[:, :TILE_H], reg_r)
                         s_w = layout_score(ol_w, img[:, TILE_H:], reg_w)
                         row.update(room_score=round(s_r, 3), wrist_score=round(s_w, 3))
@@ -165,12 +175,15 @@ def main():
                         row["reason"] = "; ".join(bad)
                         if bad:
                             draw_fail(img, [(0, ol_r), (TILE_H, ol_w)], f"{run}/check_references/{name}.png")
-            if not row["passed"]:
-                failed.append(f"{name}: {row['reason']}")
-                if os.path.isfile(f"{run}/refs_checked/{name}.png") and not row["size_ok"]:
-                    os.remove(f"{run}/refs_checked/{name}.png")
-            rows.append(row)
-            print(f"{name}: {'ok' if row['passed'] else 'FAIL ' + row['reason']}", flush=True)
+                    checked = f"{run}/refs_checked/{name}.png"
+                    if row["passed"]:
+                        cv2.imwrite(checked, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+                    elif os.path.isfile(checked):
+                        os.remove(checked)
+                if not row["passed"]:
+                    failed.append(f"{name}: {row['reason']}")
+                rows.append(row)
+                print(f"{name}: {'ok' if row['passed'] else 'FAIL ' + row['reason']}", flush=True)
 
     with open(f"{run}/check_references.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))

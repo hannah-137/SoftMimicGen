@@ -23,8 +23,9 @@ video, lossless, 1 px line between the views), `depth`, `normals`, `instance` (v
 `ref_sim/demo_NNN.png` (frame 0). Also `sheet_first.png`, `sheet_last.png`, `summary.csv`, `summary.txt`.
 Videos are 81 frames at 16 fps. `--all_frames` keeps every step.
 
-Real-looking videos with Cosmos3. First put one reference image per demo (made from `ref_sim`, aspect 2:1) in
-`<run_dir>/refs/demo_NNN.png`, then check them, then run:
+Real-looking videos with Cosmos3. First put reference images (made from `ref_sim`, aspect 2:1) in
+`<run_dir>/refs/` as `demo_NNN_<tag>.png` (several per demo, one video per image) or `demo_NNN.png`. Then check
+them, then run:
 
     python experiments/policy_data/check_references.py <run_dir>
     python experiments/policy_data/run_cosmos.py <run_dir> --framework <cosmos-framework> \
