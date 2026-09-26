@@ -12,6 +12,7 @@ Output: <run_dir>/cosmos/<name>/<reference name>/vision.mp4, plus the spec json,
 
 Settings are the ones of the earlier tests: resolution 480 tier (patched to 1024x512), 81 frames, 16 fps,
 35 steps, guidance 3, control guidance 3, shift 5, seed 0. The framework's default negative prompt is used.
+The prompt is short on purpose: the reference image gives the colors and materials. --prompt replaces it.
 The Cosmos3 checkpoint must fit on the given GPUs: Super fp8 needs 2 GPUs (48 GB) with --cp 2, Nano fp8 needs 1.
 Run with any python; the framework's own .venv python is used for torchrun.
 """
@@ -25,10 +26,9 @@ import subprocess
 import sys
 
 PROMPT = (
-    "A white Franka robot arm folds a single thick, fluffy blue terry-cloth bath towel, the same blue color and "
-    "terry-cloth texture on both sides, on a dark gray table in a laboratory, normal indoor lighting, realistic video. "
-    "The left camera is fixed and the right camera moves with the gripper. Split screen: left, the room camera; "
-    "right, the camera on the robot gripper."
+    "A Franka robot arm folds a single towel on a table, realistic video. The towel has the same color and texture "
+    "on both sides. The left camera is fixed and the right camera moves with the gripper. Split screen: left, the "
+    "room camera; right, the camera on the robot gripper."
 )
 
 
