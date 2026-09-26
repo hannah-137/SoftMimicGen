@@ -1,10 +1,12 @@
 """Make real-looking videos from the demo videos with Cosmos3 (video2video with an edge control video).
 
-  python experiments/policy_data/run_cosmos.py <run_dir> --demos 0 1 --refs <ref_000.png> <ref_001.png> \
-      --framework <cosmos-framework dir> --checkpoint <Cosmos3 checkpoint dir> --gpus 2,3 [--cp 2] [--port 29511]
+  python experiments/policy_data/run_cosmos.py <run_dir> --framework <cosmos-framework dir> \
+      --checkpoint <Cosmos3 checkpoint dir> --gpus 2,3 [--cp 2] [--port 29511] [--demos 0 1]
 
-Input per demo: <run_dir>/videos/geoedge/demo_NNN.mp4 (control video) and one reference image (1024x512, the
-look of frame 0). Cosmos keeps the reference image as frame 0 and follows the edge video.
+Input per demo: <run_dir>/videos/geoedge/demo_NNN.mp4 (control video) and <run_dir>/refs_checked/demo_NNN.png
+(reference image, written by check_references.py). Run check_references.py first. This script refuses to start
+when check_references.csv is missing or lists a failed demo (--skip_check overrides). Without --demos it takes
+every demo that passed. Cosmos keeps the reference image as frame 0 and follows the edge video.
 Output: <run_dir>/cosmos/<name>/demo_NNN/vision.mp4, plus the spec json, the reference video and the log.
 
 Settings are the ones of the earlier tests: resolution 480 tier (patched to 1024x512), 81 frames, 16 fps,
@@ -14,6 +16,7 @@ Run with any python; the framework's own .venv python is used for torchrun.
 """
 
 import argparse
+import csv
 import glob
 import json
 import os
@@ -46,6 +49,28 @@ def spec(name: str, control: str, ref: str, prompt: str, seed: int, steps: int) 
     }
 
 
+def checked_demos(run_dir: str, wanted: list | None, skip_check: bool) -> list:
+    """Demo indices to run: the ones that passed check_references.py (or the wanted ones, all must have passed)."""
+    path = f"{run_dir}/check_references.csv"
+    if skip_check:
+        if wanted is None:
+            sys.exit("--skip_check needs --demos")
+        return wanted
+    if not os.path.isfile(path):
+        sys.exit(f"{path} not found: run check_references.py first (or use --skip_check with --demos)")
+    rows = list(csv.DictReader(open(path)))
+    passed = {int(r["demo"]) for r in rows if r["passed"] == "True"}
+    failed = {int(r["demo"]) for r in rows} - passed
+    if wanted is None:
+        if failed:
+            sys.exit(f"{len(failed)} reference images failed the check: see {run_dir}/failed_references.txt")
+        return sorted(passed)
+    bad = [i for i in wanted if i not in passed]
+    if bad:
+        sys.exit(f"demos {bad} did not pass the reference check: see {run_dir}/failed_references.txt")
+    return wanted
+
+
 def framework_env(fw: str) -> dict:
     """Environment for the framework's .venv: CUDA libs from the pip packages, like the framework's own setup."""
     env = dict(os.environ)
@@ -62,8 +87,8 @@ def framework_env(fw: str) -> dict:
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("run_dir", help="folder with videos/geoedge/demo_NNN.mp4 (output of make_videos.py)")
-    ap.add_argument("--demos", type=int, nargs="+", required=True, help="demo indices")
-    ap.add_argument("--refs", nargs="+", required=True, help="one reference image (png) per demo, same order")
+    ap.add_argument("--demos", type=int, nargs="+", default=None, help="demo indices (default: all that passed the check)")
+    ap.add_argument("--skip_check", action="store_true", help="do not require check_references.csv")
     ap.add_argument("--framework", required=True, help="cosmos-framework folder (with .venv)")
     ap.add_argument("--hf_home", default=os.environ.get("HF_HOME"), help="Hugging Face cache with the text encoder (default: $HF_HOME)")
     ap.add_argument("--checkpoint", required=True, help="Cosmos3 checkpoint folder")
@@ -76,24 +101,24 @@ def main():
     ap.add_argument("--steps", type=int, default=35)
     ap.add_argument("--dry_run", action="store_true", help="write the specs and print the command, do not run")
     args = ap.parse_args()
-    if len(args.refs) != len(args.demos):
-        sys.exit("give one reference image per demo")
     if not args.hf_home:
         sys.exit("set --hf_home (or HF_HOME): the Hugging Face cache folder of the framework")
-
     run_dir = os.path.abspath(args.run_dir)
+    demos = checked_demos(run_dir, args.demos, args.skip_check)
     name = args.name or os.path.basename(os.path.normpath(args.checkpoint))
     out = f"{run_dir}/cosmos/{name}"
     os.makedirs(f"{out}/specs", exist_ok=True)
     os.makedirs(f"{out}/refs", exist_ok=True)
     specs = []
-    for idx, ref in zip(args.demos, args.refs):
+    for idx in demos:
         demo = f"demo_{idx:03d}"
         control = f"{run_dir}/videos/geoedge/{demo}.mp4"
-        if not os.path.isfile(control):
-            sys.exit(f"missing control video: {control}")
+        ref = f"{run_dir}/refs_checked/{demo}.png"
+        for path in (control, ref):
+            if not os.path.isfile(path):
+                sys.exit(f"missing: {path}")
         ref_mp4 = f"{out}/refs/{demo}.mp4"
-        ref_video(os.path.abspath(ref), ref_mp4, frames=81, fps=16)
+        ref_video(ref, ref_mp4, frames=81, fps=16)
         path = f"{out}/specs/{demo}.json"
         with open(path, "w") as f:
             json.dump(spec(demo, control, ref_mp4, args.prompt, args.seed, args.steps), f, indent=1)
@@ -113,7 +138,7 @@ def main():
         return
     with open(f"{out}/run.log", "w") as log:
         rc = subprocess.run(cmd, cwd=os.path.abspath(args.framework), env=env, stdout=log, stderr=subprocess.STDOUT).returncode
-    videos = [f"{out}/demo_{i:03d}/vision.mp4" for i in args.demos]
+    videos = [f"{out}/demo_{i:03d}/vision.mp4" for i in demos]
     done = [v for v in videos if os.path.isfile(v)]
     print(f"[run_cosmos] exit {rc}, {len(done)}/{len(videos)} videos in {out} (log: {out}/run.log)")
     sys.exit(0 if rc == 0 and len(done) == len(videos) else 1)

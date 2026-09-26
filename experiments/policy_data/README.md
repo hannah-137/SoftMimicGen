@@ -23,10 +23,16 @@ video, lossless, 1 px line between the views), `depth`, `normals`, `instance` (v
 `ref_sim/demo_NNN.png` (frame 0). Also `sheet_first.png`, `sheet_last.png`, `summary.csv`, `summary.txt`.
 Videos are 81 frames at 16 fps. `--all_frames` keeps every step.
 
-Real-looking videos with Cosmos3 (one reference image per demo, made from `ref_sim`):
+Real-looking videos with Cosmos3. First put one reference image per demo (made from `ref_sim`, aspect 2:1) in
+`<run_dir>/refs/demo_NNN.png`, then check them, then run:
 
-    python experiments/policy_data/run_cosmos.py <run_dir> --demos 0 1 --refs ref_000.png ref_001.png \
-        --framework <cosmos-framework> --checkpoint <Cosmos3-Super-fp8> --gpus 2,3 --cp 2
+    python experiments/policy_data/check_references.py <run_dir>
+    python experiments/policy_data/run_cosmos.py <run_dir> --framework <cosmos-framework> \
+        --checkpoint <Cosmos3-Super-fp8> --hf_home <hf cache> --gpus 2,3 --cp 2
+
+The check resizes 2:1 images to 1024 x 512, rejects other aspects, and scores the layout (robot and towel where
+the simulator has them). `failed_references.txt` lists the demos to make again. `run_cosmos.py` only starts when
+every reference passed.
 
 ## Files
 
@@ -34,6 +40,7 @@ Real-looking videos with Cosmos3 (one reference image per demo, made from `ref_s
 - `generate_demos.py` - upstream generation plus the camera settings and observations above.
 - `observations.py` - `GeoEdgeImage` (copied from the fork) and `RawCameraImage`.
 - `make_videos.py` - videos, sheets, summary (no GPU).
+- `check_references.py` - size and layout check of the reference images.
 - `run_cosmos.py`, `cosmos_launch.py` - Cosmos3 video2video with the edge control video.
 
 ## Needs
