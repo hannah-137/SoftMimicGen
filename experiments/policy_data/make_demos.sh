@@ -7,8 +7,8 @@
 #   <n_demos>  number of successful demos
 #   output     experiments/policy_data/runs/<task>_n<n_demos>_seed<seed>_<YYYYMMDD>_<HHMM>/ (always a new folder,
 #              the name is fixed; all other settings are in its run_config.json). It gets
-#              <task>_n<n_demos>_seed<seed>.hdf5, *_failed.hdf5, *_instance_ids.json, videos/, sheet_first.png,
-#              sheet_last.png, summary.csv, summary.txt, run_config.json, gen.log, videos.log
+#              <task>_n<n_demos>_seed<seed>.hdf5, *_failed.hdf5 (only when an attempt failed), *_instance_ids.json,
+#              videos/ (see make_videos.py), summary.txt, run_config.json, gen.log, videos.log
 #   options    --seed N (default 1)   --gpu N (physical GPU index, default 0)   --num_envs N (default 1)
 #              --wrist_focal MM (default 12)   --image_size PX (default 512)   --no_raw   --all_frames
 #              --room_camera NAME / --wrist_camera NAME (default agentview_image / robot0_eye_in_hand_image)
@@ -46,6 +46,7 @@ mkdir -p "$OUT"
 
 # CUDA sees only the chosen GPU (as cuda:0). The renderer takes the physical index.
 export CUDA_VISIBLE_DEVICES="$GPU"
+export PYTHONDONTWRITEBYTECODE=1   # no __pycache__ in this folder
 KIT_ARGS="--/renderer/multiGpu/enabled=false --/renderer/activeGpu=$GPU"
 START=$(date +%s)
 COMMIT="$(git -c safe.directory='*' rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -69,6 +70,13 @@ GEN_END=$(date +%s)
 DEMOS=$(python -c "import h5py, sys; print(len(h5py.File(sys.argv[1], 'r')['data']))" "$OUT/$NAME.hdf5" 2>/dev/null || echo 0)
 [ "$DEMOS" -ge "$N" ] || { echo "generation failed: $DEMOS/$N demos, python exit $GEN_RC (see $OUT/gen.log)"; exit 1; }
 
+# an empty failed file (no failed attempt) only adds clutter
+python - "$OUT/${NAME}_failed.hdf5" <<PY
+import h5py, os, sys
+p = sys.argv[1]
+if os.path.isfile(p) and len(h5py.File(p, "r")["data"]) == 0:
+    os.remove(p)
+PY
 python "$HERE/make_videos.py" "$OUT/$NAME.hdf5" --out "$OUT" $FRAMES 2>&1 | tee "$OUT/videos.log"
 END=$(date +%s)
 {

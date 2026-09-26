@@ -6,8 +6,8 @@ Input: <run_dir>/refs/demo_NNN_<tag>.png (several images per demo, one video per
 <run_dir>/refs/demo_NNN.png (one image), and the demo hdf5 in <run_dir>. Every demo in the hdf5 needs at least one
 image. A demo without an image is a failure ("missing").
 
-Check 1, size: the image must have the 2:1 aspect of the tiled view (room | wrist). Then it is resized to 1024 x 512
-and saved as <run_dir>/refs_checked/demo_NNN.png. A different aspect is a failure (make the image again).
+Check 1, size: the image must have the 2:1 aspect of the tiled view (room | wrist). A different aspect is a failure
+(make the image again). The layout check and run_cosmos.py resize the image to 1024 x 512 themselves.
 Check 2, layout: the robot and the towel must be where the simulator has them in frame 0. Score = share of the
 simulator outline (from the raw instance ids, grouped into robot / object / environment by prim path, so joints
 between robot links do not count) that lies within 5 px of an edge in the image. Only the moving region (robot +
@@ -15,9 +15,9 @@ towel) counts. Room and wrist views are scored separately. Pass: both >= 0.70.
 Calibration (Franka towel, 2026-09-26): simulator frame 0.91 / 0.98, the same frame resized 0.85 / 0.99, earlier
 ChatGPT references 0.86-1.00, mirrored image 0.55 / 0.41, towel removed 0.38 in the wrist view.
 
-Output: <run_dir>/check_references.csv (one row per image), <run_dir>/failed_references.txt (images to make again,
-with the reason), <run_dir>/check_references/<name>.png (image with the simulator outline drawn, only for failures),
-<run_dir>/refs_checked/<name>.png (resized copies of the images that passed). Exit code 1 when anything fails.
+Output, in the refs folder: check_references.csv (one row per image). Only when something fails:
+failed_references.txt (images to make again, with the reason) and check_<name>.png (the image with the simulator
+outline drawn). Exit code 1 when anything fails.
 """
 
 import argparse
@@ -99,7 +99,7 @@ def sim_frame0(obs, cam: str, table: dict | None):
 
 
 def load_and_resize(path: str):
-    """-> (image 1024x512 RGB or None, width, height, reason)"""
+    """-> (image 1024x512 RGB or None, width, height, reason). run_cosmos.py uses it too."""
     img = cv2.imread(path)
     if img is None:
         return None, 0, 0, "cannot read"
@@ -128,12 +128,12 @@ def main():
     ap.add_argument("--no_layout", action="store_true", help="only the size check")
     args = ap.parse_args()
     run = os.path.abspath(args.run_dir)
-    refs = args.refs or f"{run}/refs"
+    refs = os.path.abspath(args.refs or f"{run}/refs")
+    if not os.path.isdir(refs):
+        sys.exit(f"no reference folder: {refs}")
     h5path = args.hdf5 or next((f"{run}/{f}" for f in sorted(os.listdir(run)) if f.endswith(".hdf5") and "_failed" not in f), None)
     if not h5path or not os.path.isfile(h5path):
         sys.exit(f"no hdf5 in {run}")
-    os.makedirs(f"{run}/refs_checked", exist_ok=True)
-    os.makedirs(f"{run}/check_references", exist_ok=True)
     table_path = h5path[: -len(".hdf5")] + "_instance_ids.json"
     tables = json.load(open(table_path)) if os.path.isfile(table_path) else {}
     if not tables and not args.no_layout:
@@ -174,25 +174,25 @@ def main():
                         row["passed"] = not bad
                         row["reason"] = "; ".join(bad)
                         if bad:
-                            draw_fail(img, [(0, ol_r), (TILE_H, ol_w)], f"{run}/check_references/{name}.png")
-                    checked = f"{run}/refs_checked/{name}.png"
-                    if row["passed"]:
-                        cv2.imwrite(checked, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
-                    elif os.path.isfile(checked):
-                        os.remove(checked)
+                            draw_fail(img, [(0, ol_r), (TILE_H, ol_w)], f"{refs}/check_{name}.png")
                 if not row["passed"]:
                     failed.append(f"{name}: {row['reason']}")
                 rows.append(row)
                 print(f"{name}: {'ok' if row['passed'] else 'FAIL ' + row['reason']}", flush=True)
 
-    with open(f"{run}/check_references.csv", "w", newline="") as f:
+    with open(f"{refs}/check_references.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         w.writeheader()
         w.writerows(rows)
-    with open(f"{run}/failed_references.txt", "w") as f:
-        f.write("\n".join(failed) + ("\n" if failed else ""))
-    print(f"{len(rows) - len(failed)}/{len(rows)} passed. Failed list: {run}/failed_references.txt")
-    sys.exit(1 if failed else 0)
+    failed_path = f"{refs}/failed_references.txt"
+    if failed:
+        with open(failed_path, "w") as f:
+            f.write("\n".join(failed) + "\n")
+        print(f"{len(rows) - len(failed)}/{len(rows)} passed. Failed list: {failed_path}")
+        sys.exit(1)
+    if os.path.isfile(failed_path):
+        os.remove(failed_path)
+    print(f"{len(rows)}/{len(rows)} passed")
 
 
 if __name__ == "__main__":
