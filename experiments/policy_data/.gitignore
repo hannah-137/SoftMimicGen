@@ -1,0 +1,7 @@
+# outputs of make_demos.sh and run_cosmos.py
+runs/
+*.hdf5
+*.mp4
+*.png
+*.log
+__pycache__/

@@ -1,0 +1,123 @@
+"""Make real-looking videos from the demo videos with Cosmos3 (video2video with an edge control video).
+
+  python experiments/policy_data/run_cosmos.py <run_dir> --demos 0 1 --refs <ref_000.png> <ref_001.png> \
+      --framework <cosmos-framework dir> --checkpoint <Cosmos3 checkpoint dir> --gpus 2,3 [--cp 2] [--port 29511]
+
+Input per demo: <run_dir>/videos/geoedge/demo_NNN.mp4 (control video) and one reference image (1024x512, the
+look of frame 0). Cosmos keeps the reference image as frame 0 and follows the edge video.
+Output: <run_dir>/cosmos/<name>/demo_NNN/vision.mp4, plus the spec json, the reference video and the log.
+
+Settings are the ones of the earlier tests: resolution 480 tier (patched to 1024x512), 81 frames, 16 fps,
+35 steps, guidance 3, control guidance 3, shift 5, seed 0. The framework's default negative prompt is used.
+The Cosmos3 checkpoint must fit on the given GPUs: Super fp8 needs 2 GPUs (48 GB) with --cp 2, Nano fp8 needs 1.
+Run with any python; the framework's own .venv python is used for torchrun.
+"""
+
+import argparse
+import glob
+import json
+import os
+import subprocess
+import sys
+
+PROMPT = (
+    "A white Franka robot arm folds a single thick, fluffy blue terry-cloth bath towel, the same blue color and "
+    "terry-cloth texture on both sides, on a dark gray table in a laboratory, normal indoor lighting, realistic video. "
+    "The left camera is fixed and the right camera moves with the gripper. Split screen: left, the room camera; "
+    "right, the camera on the robot gripper."
+)
+
+
+def ref_video(png: str, mp4: str, frames: int, fps: int) -> None:
+    """Reference image -> still video, lossless. Cosmos reads the reference as a video."""
+    cmd = ["ffmpeg", "-loglevel", "error", "-y", "-loop", "1", "-i", png, "-frames:v", str(frames), "-r", str(fps),
+           "-c:v", "libx264", "-qp", "0", "-pix_fmt", "yuv444p", mp4]
+    subprocess.run(cmd, check=True)
+
+
+def spec(name: str, control: str, ref: str, prompt: str, seed: int, steps: int) -> dict:
+    return {
+        "model_mode": "video2video", "resolution": "480", "aspect_ratio": "16,9", "num_frames": 81, "fps": 16,
+        "shift": 5.0, "num_steps": steps, "seed": seed, "num_video_frames_per_chunk": 81, "num_conditional_frames": 1,
+        "share_vision_temporal_positions": True, "negative_metadata_mode": "none", "negative_prompt_keep_metadata": False,
+        "guidance": 3.0, "control_guidance": 3.0, "name": name,
+        "edge": {"control_path": control, "preset_edge_threshold": "medium"},
+        "vision_path": ref, "num_first_chunk_conditional_frames": 1, "prompt": prompt,
+    }
+
+
+def framework_env(fw: str) -> dict:
+    """Environment for the framework's .venv: CUDA libs from the pip packages, like the framework's own setup."""
+    env = dict(os.environ)
+    nv = glob.glob(f"{fw}/.venv/lib/python3.*/site-packages/nvidia")
+    if nv:
+        libs = [d for d in glob.glob(f"{nv[0]}/*/lib") if os.path.isdir(d)]
+        env["LD_LIBRARY_PATH"] = ":".join(libs)
+        env["NVRTC_HOME"], env["CURAND_HOME"], env["CUDNN_HOME"] = f"{nv[0]}/cuda_nvrtc", f"{nv[0]}/curand", f"{nv[0]}/cudnn"
+    env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+    env["PYTHONUNBUFFERED"] = "1"
+    return env
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("run_dir", help="folder with videos/geoedge/demo_NNN.mp4 (output of make_videos.py)")
+    ap.add_argument("--demos", type=int, nargs="+", required=True, help="demo indices")
+    ap.add_argument("--refs", nargs="+", required=True, help="one reference image (png) per demo, same order")
+    ap.add_argument("--framework", required=True, help="cosmos-framework folder (with .venv)")
+    ap.add_argument("--hf_home", default=os.environ.get("HF_HOME"), help="Hugging Face cache with the text encoder (default: $HF_HOME)")
+    ap.add_argument("--checkpoint", required=True, help="Cosmos3 checkpoint folder")
+    ap.add_argument("--gpus", default="0", help="GPU indices, comma separated (default 0)")
+    ap.add_argument("--cp", type=int, default=1, help="context parallel size (2 for Super fp8 on 2 GPUs)")
+    ap.add_argument("--port", type=int, default=29511, help="torchrun master port; use another port for a second job")
+    ap.add_argument("--name", default=None, help="output name (default: checkpoint folder name)")
+    ap.add_argument("--prompt", default=PROMPT)
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--steps", type=int, default=35)
+    ap.add_argument("--dry_run", action="store_true", help="write the specs and print the command, do not run")
+    args = ap.parse_args()
+    if len(args.refs) != len(args.demos):
+        sys.exit("give one reference image per demo")
+    if not args.hf_home:
+        sys.exit("set --hf_home (or HF_HOME): the Hugging Face cache folder of the framework")
+
+    run_dir = os.path.abspath(args.run_dir)
+    name = args.name or os.path.basename(os.path.normpath(args.checkpoint))
+    out = f"{run_dir}/cosmos/{name}"
+    os.makedirs(f"{out}/specs", exist_ok=True)
+    os.makedirs(f"{out}/refs", exist_ok=True)
+    specs = []
+    for idx, ref in zip(args.demos, args.refs):
+        demo = f"demo_{idx:03d}"
+        control = f"{run_dir}/videos/geoedge/{demo}.mp4"
+        if not os.path.isfile(control):
+            sys.exit(f"missing control video: {control}")
+        ref_mp4 = f"{out}/refs/{demo}.mp4"
+        ref_video(os.path.abspath(ref), ref_mp4, frames=81, fps=16)
+        path = f"{out}/specs/{demo}.json"
+        with open(path, "w") as f:
+            json.dump(spec(demo, control, ref_mp4, args.prompt, args.seed, args.steps), f, indent=1)
+        specs.append(path)
+
+    n_gpu = len(args.gpus.split(","))
+    env = framework_env(os.path.abspath(args.framework))
+    env["CUDA_VISIBLE_DEVICES"] = args.gpus
+    env["HF_HOME"] = os.path.abspath(args.hf_home)
+    cmd = [f"{os.path.abspath(args.framework)}/.venv/bin/torchrun", f"--nproc-per-node={n_gpu}", f"--master-port={args.port}",
+           f"{os.path.dirname(os.path.abspath(__file__))}/cosmos_launch.py",
+           "--parallelism-preset=throughput", f"--dp-shard-size={n_gpu}", "--dp-replicate-size=1", f"--cp-size={args.cp}",
+           "--cfgp-size=1", "-i", *specs, "-o", out, "--checkpoint-path", os.path.abspath(args.checkpoint),
+           "--no-guardrails", "--benchmark", "--experiment-overrides", "model.config.tokenizer.encode_chunk_frames.480=4"]
+    print("[run_cosmos]", " ".join(cmd), flush=True)
+    if args.dry_run:
+        return
+    with open(f"{out}/run.log", "w") as log:
+        rc = subprocess.run(cmd, cwd=os.path.abspath(args.framework), env=env, stdout=log, stderr=subprocess.STDOUT).returncode
+    videos = [f"{out}/demo_{i:03d}/vision.mp4" for i in args.demos]
+    done = [v for v in videos if os.path.isfile(v)]
+    print(f"[run_cosmos] exit {rc}, {len(done)}/{len(videos)} videos in {out} (log: {out}/run.log)")
+    sys.exit(0 if rc == 0 and len(done) == len(videos) else 1)
+
+
+if __name__ == "__main__":
+    main()
