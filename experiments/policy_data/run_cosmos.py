@@ -8,7 +8,9 @@ Input: <run_dir>/videos/geoedge/demo_NNN.mp4 (control video) and the reference i
 Run check_references.py first. This script refuses to start when check_references.csv is missing or lists a
 failed image (--skip_check overrides). Without --demos it takes every image that passed. Cosmos keeps the
 reference image as frame 0 and follows the edge video.
-Output: <run_dir>/cosmos/<name>/<reference name>/vision.mp4, plus the spec json, the reference video and the log.
+Output: <run_dir>/cosmos/<checkpoint folder name>_<YYYYMMDD>_<HHMM>/<reference name>/vision.mp4, plus the spec
+json, the reference video, run_config.json (prompt, seed, steps, GPUs) and the log. The folder name is fixed;
+every run gets a new one.
 
 Settings are the ones of the earlier tests: resolution 480 tier (patched to 1024x512), 81 frames, 16 fps,
 35 steps, guidance 3, control guidance 3, shift 5, seed 0. The framework's default negative prompt is used.
@@ -26,6 +28,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 PROMPT = (
     "A Franka robot arm folds a single towel on a table, realistic video. The towel has the same color and texture "
@@ -110,7 +113,6 @@ def main():
     ap.add_argument("--gpus", default="0", help="GPU indices, comma separated (default 0)")
     ap.add_argument("--cp", type=int, default=1, help="context parallel size (2 for Super fp8 on 2 GPUs)")
     ap.add_argument("--port", type=int, default=29511, help="torchrun master port; use another port for a second job")
-    ap.add_argument("--name", default=None, help="output name (default: checkpoint folder name)")
     ap.add_argument("--prompt", default=PROMPT)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps", type=int, default=35)
@@ -122,10 +124,14 @@ def main():
     pairs = checked_references(run_dir, args.demos, args.skip_check)
     if not pairs:
         sys.exit("no reference images to run")
-    name = args.name or os.path.basename(os.path.normpath(args.checkpoint))
+    name = f"{os.path.basename(os.path.normpath(args.checkpoint))}_{time.strftime('%Y%m%d_%H%M')}"
     out = f"{run_dir}/cosmos/{name}"
     os.makedirs(f"{out}/specs", exist_ok=True)
     os.makedirs(f"{out}/refs", exist_ok=True)
+    with open(f"{out}/run_config.json", "w") as f:
+        json.dump({"checkpoint": os.path.abspath(args.checkpoint), "references": [n for _, n in pairs], "prompt": args.prompt,
+                   "seed": args.seed, "steps": args.steps, "gpus": args.gpus, "cp": args.cp, "started": time.strftime("%Y-%m-%dT%H:%M:%S")},
+                  f, indent=1)
     specs = []
     for idx, name in pairs:
         control = f"{run_dir}/videos/geoedge/demo_{idx:03d}.mp4"

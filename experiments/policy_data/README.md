@@ -16,9 +16,10 @@ made with Cosmos3. Needs only upstream SoftMimicGen and this folder.
 ## Run
 
     conda activate softmimicgen
-    bash experiments/policy_data/make_demos.sh franka_towel 50 experiments/policy_data/runs/franka_towel_n50 --gpu 1
+    bash experiments/policy_data/make_demos.sh franka_towel 50 --gpu 1
 
-This makes the hdf5 and, per demo, the videos in `videos/`: `source` (room | wrist RGB), `geoedge` (control
+This writes a new folder `experiments/policy_data/runs/franka_towel_n50_seed1_<date>_<time>`. It holds the hdf5
+and, per demo, the videos in `videos/`: `source` (room | wrist RGB), `geoedge` (control
 video, lossless, 1 px line between the views), `depth`, `normals`, `instance` (views of the raw data) and
 `ref_sim/demo_NNN.png` (frame 0). Also `sheet_first.png`, `sheet_last.png`, `summary.csv`, `summary.txt`.
 Videos are 81 frames at 16 fps. `--all_frames` keeps every step.
@@ -32,8 +33,19 @@ them, then run:
         --checkpoint <Cosmos3-Super-fp8> --hf_home <hf cache> --gpus 2,3 --cp 2
 
 The check resizes 2:1 images to 1024 x 512, rejects other aspects, and scores the layout (robot and towel where
-the simulator has them). `failed_references.txt` lists the demos to make again. `run_cosmos.py` only starts when
-every reference passed.
+the simulator has them). `failed_references.txt` lists the images to make again. `run_cosmos.py` only starts when
+every reference passed. Its output goes to `<run_dir>/cosmos/<checkpoint name>_<date>_<time>/`.
+
+## Names
+
+Folder names are fixed by the scripts. Do not rename them or add words.
+
+- Demo run: `runs/<task>_n<demos>_seed<seed>_<YYYYMMDD>_<HHMM>/`. Other settings (cameras, raw data) are in its
+  `run_config.json`.
+- Cosmos run: `<run dir>/cosmos/<checkpoint name>_<YYYYMMDD>_<HHMM>/`. Prompt, seed and steps are in its
+  `run_config.json`.
+- Reference images: `refs/demo_<NNN>_<TT>.png`, NNN = demo index, TT = two-digit number (01, 02, ...).
+- Videos: `<cosmos run>/demo_<NNN>_<TT>/vision.mp4`, the same name as the reference image.
 
 ## Files
 

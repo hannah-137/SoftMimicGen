@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Generate demos and their videos in one call.
 #
-#   bash experiments/policy_data/make_demos.sh <task> <n_demos> <out_dir> [options]
+#   bash experiments/policy_data/make_demos.sh <task> <n_demos> [options]
 #
 #   <task>     annotated source dataset: datasets/annotated_dataset/annotated_dataset_<task>.hdf5 (e.g. franka_towel)
 #   <n_demos>  number of successful demos
-#   <out_dir>  output folder: <task>_n<n_demos>_seed<seed>.hdf5, *_failed.hdf5, *_instance_ids.json, videos/,
-#              sheet_first.png, sheet_last.png, summary.csv, summary.txt, run_config.json, gen.log, videos.log
+#   output     experiments/policy_data/runs/<task>_n<n_demos>_seed<seed>_<YYYYMMDD>_<HHMM>/ (always a new folder,
+#              the name is fixed; all other settings are in its run_config.json). It gets
+#              <task>_n<n_demos>_seed<seed>.hdf5, *_failed.hdf5, *_instance_ids.json, videos/, sheet_first.png,
+#              sheet_last.png, summary.csv, summary.txt, run_config.json, gen.log, videos.log
 #   options    --seed N (default 1)   --gpu N (physical GPU index, default 0)   --num_envs N (default 1)
 #              --wrist_focal MM (default 12)   --image_size PX (default 512)   --no_raw   --all_frames
 #              --room_camera NAME / --wrist_camera NAME (default agentview_image / robot0_eye_in_hand_image)
@@ -14,9 +16,8 @@
 # Run inside the SoftMimicGen environment (conda activate softmimicgen).
 set -eo pipefail
 usage() { sed -n '2,14p' "$0"; exit 1; }
-[ $# -ge 3 ] || usage
-TASK="$1"; N="$2"; OUT="$3"; shift 3
-[[ "$OUT" = /* ]] || OUT="$PWD/$OUT"
+[ $# -ge 2 ] || usage
+TASK="$1"; N="$2"; shift 2
 SEED=1; GPU=0; NUM_ENVS=1; WRIST_FOCAL=12; IMAGE_SIZE=512; RAW=""; FRAMES=""
 ROOM_CAM=agentview_image; WRIST_CAM=robot0_eye_in_hand_image
 while [ $# -gt 0 ]; do
@@ -36,6 +37,7 @@ done
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 cd "$ROOT"
+OUT="$HERE/runs/${TASK}_n${N}_seed${SEED}_$(date +%Y%m%d_%H%M)"
 IN="datasets/annotated_dataset/annotated_dataset_${TASK}.hdf5"
 [ -f "$IN" ] || { echo "input not found: $IN"; exit 1; }
 NAME="${TASK}_n${N}_seed${SEED}"
