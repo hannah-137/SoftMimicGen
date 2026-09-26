@@ -8,7 +8,8 @@
 #   output     experiments/policy_data/runs/<task>_n<n_demos>_seed<seed>_<YYYYMMDD>_<HHMM>/ (always a new folder,
 #              the name is fixed; all other settings are in its run_config.json). It gets
 #              <task>_n<n_demos>_seed<seed>.hdf5, *_failed.hdf5 (only when an attempt failed), *_instance_ids.json,
-#              videos/ (see make_videos.py), summary.txt, run_config.json, gen.log, videos.log
+#              demos/ (see make_videos.py), sheet_first.png, sheet_last.png, summary.csv, summary.txt, run_config.json,
+#              gen.log, videos.log
 #   options    --seed N (default 1)   --gpu N (physical GPU index, default 0)   --num_envs N (default 1)
 #              --wrist_focal MM (default 12)   --image_size PX (default 512)   --no_raw   --all_frames
 #              --room_camera NAME / --wrist_camera NAME (default agentview_image / robot0_eye_in_hand_image)

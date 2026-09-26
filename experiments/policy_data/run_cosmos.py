@@ -3,13 +3,15 @@
   python experiments/policy_data/run_cosmos.py <run_dir> --framework <cosmos-framework dir> \
       --checkpoint <Cosmos3 checkpoint dir> --gpus 2,3 [--cp 2] [--port 29511] [--demos 0 1]
 
-Input: <run_dir>/videos/demo_NNN_geoedge.mp4 (control video) and the reference images in <run_dir>/refs/
-(demo_NNN_<tag>.png or demo_NNN.png, checked by check_references.py). One video per reference image.
+Input: <run_dir>/demos/000-049/demo_NNN/demo_NNN_geoedge.mp4 (control video) and the reference images in
+<run_dir>/refs/000-049/ (demo_NNN_<tag>.png or demo_NNN.png, checked by checks/check_references.py; 50 demos per
+folder, see layout.py). One video per reference image.
 Run check_references.py first. This script refuses to start when refs/check_references.csv is missing or lists
 a failed image (--skip_check overrides). Without --demos it takes every image that passed. Cosmos keeps the
 reference image as frame 0 and follows the edge video.
-Output: <run_dir>/cosmos/<checkpoint folder name>_<YYYYMMDD>_<HHMM>/ with, per reference, <name>.mp4 (the video)
-and <name>.json (the settings the framework used), plus run_config.json, run.log, debug.log and benchmark.json.
+Output: <run_dir>/cosmos/<checkpoint folder name>_<YYYYMMDD>_<HHMM>/ with, per reference, 000-049/<name>.mp4 (the
+video) and 000-049/<name>.json (the settings the framework used), plus run_config.json, run.log, debug.log and
+benchmark.json at the top.
 The folder name is fixed; every run gets a new one. Temporary files (reference videos, specs, framework
 folders) are removed after a successful run; after a failure everything stays for a look.
 
@@ -34,8 +36,9 @@ import time
 
 import cv2
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "checks"))
 import check_references  # noqa: E402
+import layout  # noqa: E402
 
 PROMPT = (
     "A Franka robot arm folds a single towel on a table, realistic video. The towel has the same color and texture "
@@ -76,7 +79,8 @@ def checked_references(run_dir: str, wanted: list | None, skip_check: bool) -> l
             sys.exit("--skip_check needs --demos")
         pairs = []
         for i in wanted:
-            names = sorted(os.path.basename(f)[: -len(".png")] for f in glob.glob(f"{run_dir}/refs/demo_{i:03d}*.png"))
+            names = sorted(os.path.basename(f)[: -len(".png")]
+                           for f in glob.glob(f"{layout.ref_dir(run_dir + '/refs', i)}/{layout.demo_name(i)}*.png"))
             pairs += [(i, n) for n in names]
         return pairs
     if not os.path.isfile(path):
@@ -94,18 +98,20 @@ def checked_references(run_dir: str, wanted: list | None, skip_check: bool) -> l
     return [(i, n) for i, n in passed if i in wanted]
 
 
-def tidy(out: str, names: list) -> list:
-    """After the run: <out>/<name>/vision.mp4 -> <out>/<name>.mp4, sample_args.json -> <name>.json, temporary files
-    removed. Returns the names whose video is missing (their folders are kept)."""
+def tidy(out: str, pairs: list) -> list:
+    """After the run: <out>/<name>/vision.mp4 -> <out>/<chunk>/<name>.mp4, sample_args.json -> <name>.json, temporary
+    files removed. Returns the names whose video is missing (their folders are kept)."""
     missing = []
-    for name in names:
+    for idx, name in pairs:
         src = f"{out}/{name}"
         if not os.path.isfile(f"{src}/vision.mp4"):
             missing.append(name)
             continue
-        os.replace(f"{src}/vision.mp4", f"{out}/{name}.mp4")
+        dst = f"{out}/{layout.chunk(idx)}"
+        os.makedirs(dst, exist_ok=True)
+        os.replace(f"{src}/vision.mp4", f"{dst}/{name}.mp4")
         if os.path.isfile(f"{src}/sample_args.json"):
-            os.replace(f"{src}/sample_args.json", f"{out}/{name}.json")
+            os.replace(f"{src}/sample_args.json", f"{dst}/{name}.json")
         shutil.rmtree(src)
     if not missing:
         for d in ("refs", "specs"):
@@ -169,8 +175,8 @@ def main():
                   f, indent=1)
     specs = []
     for idx, name in pairs:
-        control = f"{run_dir}/videos/demo_{idx:03d}_geoedge.mp4"
-        ref = f"{run_dir}/refs/{name}.png"
+        control = f"{layout.demo_dir(run_dir, idx)}/{layout.demo_name(idx)}_geoedge.mp4"
+        ref = f"{layout.ref_dir(run_dir + '/refs', idx)}/{name}.png"
         for path in (control, ref):
             if not os.path.isfile(path):
                 sys.exit(f"missing: {path}")
@@ -195,7 +201,7 @@ def main():
         return
     with open(f"{out}/run.log", "w") as log:
         rc = subprocess.run(cmd, cwd=os.path.abspath(args.framework), env=env, stdout=log, stderr=subprocess.STDOUT).returncode
-    missing = tidy(out, [name for _, name in pairs])
+    missing = tidy(out, pairs)
     print(f"[run_cosmos] exit {rc}, {len(pairs) - len(missing)}/{len(pairs)} videos in {out} (log: {out}/run.log)")
     if missing:
         print(f"[run_cosmos] missing: {', '.join(missing)}")

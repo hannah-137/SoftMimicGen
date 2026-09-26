@@ -2,14 +2,15 @@
 
   python experiments/policy_data/make_videos.py <demos.hdf5> [--out <dir>] [--all_frames] [--far 2.0]
 
-Output in <dir>/videos/ (default <dir> = folder of the hdf5), per demo:
+Output in <dir> (default: folder of the hdf5). Per demo, in demos/000-049/demo_NNN/ (50 demos per folder, see
+layout.py):
   demo_NNN_source.mp4     room | wrist RGB, side by side (1024x512), lossy
   demo_NNN_geoedge.mp4    room | wrist geometry edges, lossless, 1 px white line on the border. Control video.
   demo_NNN_depth.mp4      raw depth as gray: 0 m black, far plane white (lossless)
   demo_NNN_normals.mp4    raw normals as color: (xyz + 1) * 127.5 (lossless)
   demo_NNN_instance.mp4   raw instance id as color, one fixed color per id (lossless)
   demo_NNN_ref_sim.png    frame 0 of the source video, the base for a reference image
-and for the whole file: sheet_first.png, sheet_last.png (room frame 0 and last of every demo) and summary.csv.
+and in <dir>: sheet_first.png, sheet_last.png (room frame 0 and last of every demo) and summary.csv.
 
 Frames: 81 frames spread over the demo at 16 fps (same as the earlier video tests). --all_frames keeps every
 step at the control rate. Needs h5py, numpy, opencv-python, imageio, imageio-ffmpeg.
@@ -25,6 +26,8 @@ import cv2
 import h5py
 import imageio
 import numpy as np
+
+import layout
 
 N_FRAMES, FPS = 81, 16
 LOSSLESS_RGB = {"codec": "libx264rgb", "pixelformat": "rgb24", "output_params": ["-qp", "0"]}
@@ -126,7 +129,7 @@ def main():
     ap.add_argument("--all_frames", action="store_true", help="every step at the control rate instead of 81 frames at 16 fps")
     ap.add_argument("--far", type=float, default=2.0, help="depth video: this distance in m becomes white")
     args = ap.parse_args()
-    out = f"{args.out or os.path.dirname(os.path.abspath(args.hdf5))}/videos"
+    out = os.path.abspath(args.out or os.path.dirname(os.path.abspath(args.hdf5)))
     os.makedirs(out, exist_ok=True)
 
     first, last, names, rows = [], [], [], []
@@ -139,18 +142,20 @@ def main():
         for key in demos:
             obs = h5["data"][key]["obs"]
             idx = int(key.split("_")[-1])
-            name = f"demo_{idx:03d}"
+            name = layout.demo_name(idx)
+            d = layout.demo_dir(out, idx)
+            os.makedirs(d, exist_ok=True)
             steps = obs[room_key].shape[0]
             sel = np.arange(steps) if args.all_frames else sample_idx(steps)
             fps = control_fps(h5) if args.all_frames else FPS
 
             room, wrist = obs[room_key][:][sel], obs[wrist_key][:][sel]
-            write(f"{out}/{name}_source.mp4", [tile(a, b) for a, b in zip(room, wrist)], fps, None, check=False)
-            cv2.imwrite(f"{out}/{name}_ref_sim.png", cv2.cvtColor(tile(room[0], wrist[0]), cv2.COLOR_RGB2BGR))
+            write(f"{d}/{name}_source.mp4", [tile(a, b) for a, b in zip(room, wrist)], fps, None, check=False)
+            cv2.imwrite(f"{d}/{name}_ref_sim.png", cv2.cvtColor(tile(room[0], wrist[0]), cv2.COLOR_RGB2BGR))
 
             e_room, e_wrist = obs[f"{rp}_geoedge"][:][sel][..., 0], obs[f"{wp}_geoedge"][:][sel][..., 0]
             edge_frames = [cv2.cvtColor(tile(a, b, line=True), cv2.COLOR_GRAY2RGB) for a, b in zip(e_room, e_wrist)]
-            write(f"{out}/{name}_geoedge.mp4", edge_frames, fps, LOSSLESS_EDGE, check=True)
+            write(f"{d}/{name}_geoedge.mp4", edge_frames, fps, LOSSLESS_EDGE, check=True)
 
             if f"{rp}_depth_raw" in obs:
                 conv = {
@@ -160,7 +165,7 @@ def main():
                 }
                 for kind, fn in conv.items():
                     frames = [tile(a, b) for a, b in zip(fn(rp), fn(wp))]
-                    write(f"{out}/{name}_{kind}.mp4", frames, fps, LOSSLESS_RGB, check=True)
+                    write(f"{d}/{name}_{kind}.mp4", frames, fps, LOSSLESS_RGB, check=True)
 
             rows.append([idx, steps, round(steps / control_fps(h5), 2), bool(h5["data"][key].attrs.get("success", True))])
             first.append(room[0].copy())
@@ -174,7 +179,7 @@ def main():
         w = csv.writer(f)
         w.writerow(["demo", "steps", "seconds", "success"])
         w.writerows(rows)
-    print(f"{len(rows)} demos, mean {np.mean([r[1] for r in rows]):.1f} steps -> {out}")
+    print(f"{len(rows)} demos, mean {np.mean([r[1] for r in rows]):.1f} steps -> {out}/demos")
 
 
 if __name__ == "__main__":

@@ -2,9 +2,10 @@
 
   python experiments/policy_data/check_references.py <run_dir> [--refs <folder>] [--no_layout]
 
-Input: <run_dir>/refs/demo_NNN_<tag>.png (several images per demo, one video per image later) or
-<run_dir>/refs/demo_NNN.png (one image), and the demo hdf5 in <run_dir>. Every demo in the hdf5 needs at least one
-image. A demo without an image is a failure ("missing").
+Input: the demo hdf5 in <run_dir> and the reference images in <run_dir>/refs/000-049/, <run_dir>/refs/050-099/, ...
+(the folder of the demo, 50 demos per folder, see layout.py), named demo_NNN_<tag>.png (several images per demo,
+one video per image later) or demo_NNN.png (one image). Every demo in the hdf5 needs at least one image. A demo
+without an image is a failure ("missing"). An image in the wrong folder is a failure ("wrong folder").
 
 Check 1, size: the image must have the 2:1 aspect of the tiled view (room | wrist). A different aspect is a failure
 (make the image again). The layout check and run_cosmos.py resize the image to 1024 x 512 themselves.
@@ -16,8 +17,8 @@ Calibration (Franka towel, 2026-09-26): simulator frame 0.91 / 0.98, the same fr
 ChatGPT references 0.86-1.00, mirrored image 0.55 / 0.41, towel removed 0.38 in the wrist view.
 
 Output, in the refs folder: check_references.csv (one row per image). Only when something fails:
-failed_references.txt (images to make again, with the reason) and check_<name>.png (the image with the simulator
-outline drawn). Exit code 1 when anything fails.
+failed_references.txt (images to make again, with the reason) and check_<name>.png next to the image (the image
+with the simulator outline drawn). Exit code 1 when anything fails.
 """
 
 import argparse
@@ -31,6 +32,9 @@ import sys
 import cv2
 import h5py
 import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import layout  # noqa: E402
 
 TILE_W, TILE_H = 1024, 512
 TOL = 5  # px between a simulator outline pixel and an image edge
@@ -123,7 +127,7 @@ def draw_fail(img_rgb: np.ndarray, outlines: list, path: str) -> None:
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("run_dir")
-    ap.add_argument("--refs", default=None, help="folder with demo_NNN.png (default <run_dir>/refs)")
+    ap.add_argument("--refs", default=None, help="folder with the 000-049/... image folders (default <run_dir>/refs)")
     ap.add_argument("--hdf5", default=None, help="demo file (default: the one hdf5 in <run_dir> without _failed)")
     ap.add_argument("--no_layout", action="store_true", help="only the size check")
     args = ap.parse_args()
@@ -145,8 +149,17 @@ def main():
         room_key, wrist_key = camera_keys(h5["data"][demos[0]]["obs"])
         for key in demos:
             idx = int(key.split("_")[-1])
-            demo = f"demo_{idx:03d}"
-            files = sorted(f for f in glob.glob(f"{refs}/{demo}*.png") if re.fullmatch(rf"{demo}(_[^/]+)?\.png", os.path.basename(f)))
+            demo = layout.demo_name(idx)
+            folder = layout.ref_dir(refs, idx)
+            files = sorted(f for f in glob.glob(f"{refs}/**/{demo}*.png", recursive=True)
+                           if re.fullmatch(rf"{demo}(_[^/]+)?\.png", os.path.basename(f)))
+            for src in [f for f in files if os.path.dirname(f) != folder]:
+                name = os.path.basename(src)[: -len(".png")]
+                rows.append({"demo": idx, "name": name, "file": src, "width": 0, "height": 0, "size_ok": False,
+                             "room_score": "", "wrist_score": "", "passed": False, "reason": f"wrong folder, move it to {folder}"})
+                failed.append(f"{name}: wrong folder, move it to {folder}")
+                print(f"{name}: FAIL wrong folder ({os.path.dirname(src)}), move it to {folder}", flush=True)
+            files = [f for f in files if os.path.dirname(f) == folder]
             if not files:
                 rows.append({"demo": idx, "name": demo, "file": "", "width": 0, "height": 0, "size_ok": False,
                              "room_score": "", "wrist_score": "", "passed": False, "reason": "missing"})
@@ -174,7 +187,7 @@ def main():
                         row["passed"] = not bad
                         row["reason"] = "; ".join(bad)
                         if bad:
-                            draw_fail(img, [(0, ol_r), (TILE_H, ol_w)], f"{refs}/check_{name}.png")
+                            draw_fail(img, [(0, ol_r), (TILE_H, ol_w)], f"{folder}/check_{name}.png")
                 if not row["passed"]:
                     failed.append(f"{name}: {row['reason']}")
                 rows.append(row)
