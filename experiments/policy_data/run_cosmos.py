@@ -14,6 +14,8 @@ Settings are the ones of the earlier tests: resolution 480 tier (patched to 1024
 35 steps, guidance 3, control guidance 3, shift 5, seed 0. The framework's default negative prompt is used.
 The prompt is short on purpose: the reference image gives the colors and materials. --prompt replaces it.
 The Cosmos3 checkpoint must fit on the given GPUs: Super fp8 needs 2 GPUs (48 GB) with --cp 2, Nano fp8 needs 1.
+The framework downloads small parts (text encoder, tokenizer) with "uv run hf download". Give --tools <dir> when
+uv and its caches are not in the default places: <dir>/bin/uv, <dir>/uv_cache, <dir>/uv_python, <dir>/uv_tools.
 Run with any python; the framework's own .venv python is used for torchrun.
 """
 
@@ -76,9 +78,16 @@ def checked_references(run_dir: str, wanted: list | None, skip_check: bool) -> l
     return [(i, n) for i, n in passed if i in wanted]
 
 
-def framework_env(fw: str) -> dict:
+def framework_env(fw: str, tools: str | None) -> dict:
     """Environment for the framework's .venv: CUDA libs from the pip packages, like the framework's own setup."""
     env = dict(os.environ)
+    if tools:
+        tools = os.path.abspath(tools)
+        env["PATH"] = f"{tools}/bin:" + env.get("PATH", "")
+        env["UV_CACHE_DIR"], env["UV_PYTHON_INSTALL_DIR"] = f"{tools}/uv_cache", f"{tools}/uv_python"
+        env["UV_TOOL_DIR"], env["UV_TOOL_BIN_DIR"] = f"{tools}/uv_tools", f"{tools}/bin"
+    if not any(os.path.isfile(f"{d}/uv") for d in env["PATH"].split(":") if d):
+        sys.exit("uv not found on PATH: give --tools <dir> with bin/uv")
     nv = glob.glob(f"{fw}/.venv/lib/python3.*/site-packages/nvidia")
     if nv:
         libs = [d for d in glob.glob(f"{nv[0]}/*/lib") if os.path.isdir(d)]
@@ -96,6 +105,7 @@ def main():
     ap.add_argument("--skip_check", action="store_true", help="do not require check_references.csv")
     ap.add_argument("--framework", required=True, help="cosmos-framework folder (with .venv)")
     ap.add_argument("--hf_home", default=os.environ.get("HF_HOME"), help="Hugging Face cache with the text encoder (default: $HF_HOME)")
+    ap.add_argument("--tools", default=None, help="folder with bin/uv and the uv caches (see above)")
     ap.add_argument("--checkpoint", required=True, help="Cosmos3 checkpoint folder")
     ap.add_argument("--gpus", default="0", help="GPU indices, comma separated (default 0)")
     ap.add_argument("--cp", type=int, default=1, help="context parallel size (2 for Super fp8 on 2 GPUs)")
@@ -131,7 +141,7 @@ def main():
         specs.append(path)
 
     n_gpu = len(args.gpus.split(","))
-    env = framework_env(os.path.abspath(args.framework))
+    env = framework_env(os.path.abspath(args.framework), args.tools)
     env["CUDA_VISIBLE_DEVICES"] = args.gpus
     env["HF_HOME"] = os.path.abspath(args.hf_home)
     cmd = [f"{os.path.abspath(args.framework)}/.venv/bin/torchrun", f"--nproc-per-node={n_gpu}", f"--master-port={args.port}",
