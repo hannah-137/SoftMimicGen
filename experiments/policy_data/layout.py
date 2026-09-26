@@ -3,7 +3,8 @@
 Per-demo files, reference images and Cosmos videos are grouped in folders of CHUNK demos (000-049, 050-099, ...),
 so no folder holds hundreds of files. The rule is the same for 2 demos and for 750 demos.
 
-    <run>/demos/000-049/demo_002/demo_002_source.mp4 ...            make_videos.py
+    <run>/demos/000-049/demo_002/demo_002_source.mp4 ...            make_videos.py (videos of one demo)
+    <run>/ref_sim/000-049/demo_002_ref_sim.png                      make_videos.py (frame 0, for reference images)
     <run>/refs/000-049/demo_002_01.png                              your reference images
     <run>/cosmos/<checkpoint>_<date>_<time>/000-049/demo_002_01.mp4  run_cosmos.py
 """
@@ -29,6 +30,11 @@ def demo_index(name: str) -> int:
 def demo_dir(run: str, idx: int) -> str:
     """Folder of the videos of one demo: <run>/demos/000-049/demo_002."""
     return f"{run}/demos/{chunk(idx)}/{demo_name(idx)}"
+
+
+def ref_sim_dir(run: str, idx: int) -> str:
+    """Folder of the frame-0 images (ref_sim) of a group of demos: <run>/ref_sim/000-049."""
+    return f"{run}/ref_sim/{chunk(idx)}"
 
 
 def ref_dir(refs: str, idx: int) -> str:

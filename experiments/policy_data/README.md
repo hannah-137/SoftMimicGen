@@ -28,7 +28,8 @@ This writes a new folder. Videos are 81 frames at 16 fps; `--all_frames` keeps e
       sheet_first.png, sheet_last.png (room frame 0 / last frame of every demo), summary.csv (steps per demo)
       demos/000-049/demo_NNN/   demo_NNN_source.mp4 (room | wrist RGB), demo_NNN_geoedge.mp4 (edges, the control
                 video, 1 px line between the views), demo_NNN_depth.mp4, demo_NNN_normals.mp4,
-                demo_NNN_instance.mp4 (views of the raw data), demo_NNN_ref_sim.png (frame 0)
+                demo_NNN_instance.mp4 (views of the raw data)
+      ref_sim/000-049/   demo_NNN_ref_sim.png (frame 0 of every demo, the base for the reference images)
       refs/000-049/   your reference images demo_NNN_TT.png, in the folder of their demo;
                 refs/check_references.csv (+ failed_references.txt, and check_<name>.png next to the image,
                 only when something fails)
@@ -66,6 +67,7 @@ Folder names are fixed by the scripts. Do not rename them or add words.
 - Cosmos run: `<run dir>/cosmos/<checkpoint name>_<YYYYMMDD>_<HHMM>/`. Prompt, seed and steps are in its
   `run_config.json`.
 - Demo folders: `demos/<AAA>-<BBB>/demo_<NNN>/`, 50 demos per group folder (000-049, 050-099, ...).
+- Frame-0 images: `ref_sim/<AAA>-<BBB>/demo_<NNN>_ref_sim.png`.
 - Reference images: `refs/<AAA>-<BBB>/demo_<NNN>_<TT>.png`, NNN = demo index, TT = two-digit number (01, 02, ...).
 - Videos: `<cosmos run>/<AAA>-<BBB>/demo_<NNN>_<TT>.mp4`, the same name as the reference image.
 

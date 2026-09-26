@@ -9,6 +9,7 @@ layout.py):
   demo_NNN_depth.mp4      raw depth as gray: 0 m black, far plane white (lossless)
   demo_NNN_normals.mp4    raw normals as color: (xyz + 1) * 127.5 (lossless)
   demo_NNN_instance.mp4   raw instance id as color, one fixed color per id (lossless)
+and in ref_sim/000-049/ (one folder per 50 demos, easy to download):
   demo_NNN_ref_sim.png    frame 0 of the source video, the base for a reference image
 and in <dir>: sheet_first.png, sheet_last.png (room frame 0 and last of every demo) and summary.csv.
 
@@ -151,7 +152,9 @@ def main():
 
             room, wrist = obs[room_key][:][sel], obs[wrist_key][:][sel]
             write(f"{d}/{name}_source.mp4", [tile(a, b) for a, b in zip(room, wrist)], fps, None, check=False)
-            cv2.imwrite(f"{d}/{name}_ref_sim.png", cv2.cvtColor(tile(room[0], wrist[0]), cv2.COLOR_RGB2BGR))
+            rs = layout.ref_sim_dir(out, idx)
+            os.makedirs(rs, exist_ok=True)
+            cv2.imwrite(f"{rs}/{name}_ref_sim.png", cv2.cvtColor(tile(room[0], wrist[0]), cv2.COLOR_RGB2BGR))
 
             e_room, e_wrist = obs[f"{rp}_geoedge"][:][sel][..., 0], obs[f"{wp}_geoedge"][:][sel][..., 0]
             edge_frames = [cv2.cvtColor(tile(a, b, line=True), cv2.COLOR_GRAY2RGB) for a, b in zip(e_room, e_wrist)]
