@@ -3,6 +3,7 @@
   export OPENAI_API_KEY=...
   python experiments/policy_data/make_references.py <run_dir> [--demos 2 7] [--seed 0] [--model gpt-image-2]
       [--quality medium] [--size 2048x1024] [--tag 01] [--workers 3] [--retry] [--dry_run]
+      [--prompt_file <file>] [--refs <folder>]
 
 Input: <run_dir>/ref_sim/000-049/demo_NNN_ref_sim.png (frame 0, room | wrist, 1024x512, made by make_videos.py).
 Output: <run_dir>/refs/000-049/demo_NNN_<tag>.png (1024x512) and <run_dir>/refs/references.csv with one row per
@@ -17,6 +18,9 @@ Size: the API needs at least 655,360 pixels, so the image is made at 2048x1024 a
 Flow: make_references.py -> checks/check_references.py -> make_references.py --retry -> check again -> run_cosmos.py
 --retry reads refs/failed_references.txt. It makes the failed and the missing images with this --tag again, as a new
 attempt: same place type, new combination. The replaced image goes to <run_dir>/refs_rejected/.
+--prompt_file uses another prompt: a text file with {variation} where the axis sentences go. --refs writes to another
+folder (default <run_dir>/refs, the replaced images then go to <folder>_rejected). Two folders with the same --tag get
+the same axis sentences, so two prompts can be compared on the same variations.
 An image in the wrong folder is not made again, even when its demo counts as missing: move it.
 Images that already exist are skipped (without --retry).
 --dry_run prints the prompt and the variations and writes nothing. It needs no API key.
@@ -145,12 +149,17 @@ def main():
     ap.add_argument("--workers", type=int, default=3, help="parallel API calls")
     ap.add_argument("--retry", action="store_true", help="make the images in refs/failed_references.txt again")
     ap.add_argument("--dry_run", action="store_true", help="print the prompt and the variations, call nothing")
+    ap.add_argument("--prompt_file", default=None, help="prompt text with {variation} (default: the prompt here)")
+    ap.add_argument("--refs", default=None, help="output folder (default <run_dir>/refs)")
     args = ap.parse_args()
     check_size(args.size)
 
     run = os.path.abspath(args.run_dir)
-    refs = f"{run}/refs"
-    rejected = f"{run}/refs_rejected"
+    refs = os.path.abspath(args.refs) if args.refs else f"{run}/refs"
+    rejected = f"{refs}_rejected"
+    prompt = open(args.prompt_file).read().strip() if args.prompt_file else PROMPT
+    if prompt.count("{variation}") != 1:
+        sys.exit("the prompt needs {variation} exactly once")
     csv_path = f"{refs}/references.csv"
     rows = read_rows(csv_path)
     used = {tuple(r[f] for f in variations.FIELDS) for r in rows}
@@ -182,13 +191,13 @@ def main():
         attempt = attempts.get(name, 0)
         v = variations.draw(idx, args.seed, used, attempt=attempt, tag=args.tag)
         used.add(variations.key(v))
-        jobs.append((idx, name, attempt, args.seed, src, dst, v, PROMPT.format(variation=variations.sentence(v))))
+        jobs.append((idx, name, attempt, args.seed, src, dst, v, prompt.replace("{variation}", variations.sentence(v))))
     if not jobs:
         print("nothing to do")
         return
 
     if args.dry_run:
-        print("prompt:", PROMPT.format(variation="{variation}"))
+        print("prompt:", prompt)
         for idx, name, attempt, seed, src, dst, v, prompt in jobs:
             print(f"{name} (attempt {attempt}, seed {seed}, {v['place_type']}): {variations.sentence(v)}")
         types = collections.Counter(j[6]["place_type"] for j in jobs)

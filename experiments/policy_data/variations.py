@@ -228,27 +228,20 @@ PLACES = {
     ],
 }
 
-# The table under the towel. Used as "The table is {table}."
+# The top surface of the table. Only the surface changes: no other shape, no legs, nothing see-through, no
+# cloth that hangs over the edge. Used as "The table top is {table}."
 TABLES = [
-    "a metal workbench", "an old wooden workbench with scratches", "a slightly scratched steel table",
-    "a glossy white laminate table", "a gray plastic folding table", "a stainless steel cart",
-    "a worn school desk with a scratched top", "a marble-look counter", "covered with a green cutting mat",
-    "covered with a black rubber mat", "a light oak desk", "a dark walnut table", "a pine table with visible grain",
-    "a bamboo table", "a birch plywood table", "a black painted wooden table", "a white painted wooden table",
-    "a red painted workbench", "a blue metal table with a powder coat finish", "a green metal table with chipped paint",
-    "a brushed aluminum table", "a polished chrome table", "a rusty steel table", "a concrete table",
-    "a granite counter", "a white quartz counter", "a black slate table", "a glass table with a metal frame",
-    "a frosted glass table", "a clear acrylic table", "a beige laminate office desk", "a gray laminate office desk",
-    "a wood-look laminate table", "a table covered with a white tablecloth", "a table covered with a blue tablecloth",
-    "a table covered with a red checkered cloth", "a table covered with a gray felt cloth",
-    "a table covered with kraft paper", "a table covered with a thin foam sheet",
-    "a table covered with a wooden cutting board", "a ceramic tiled table", "a mosaic tiled table", "a cork-top table",
-    "a leather-top desk", "a carpet-covered platform", "a wooden picnic table", "a wooden kitchen island",
-    "a butcher block counter", "a lab bench with a black resin top", "a lab bench with a white resin top",
-    "a hospital bed table", "a folding camping table", "a wooden pallet on a stand",
-    "an ironing board style padded table", "a table with a perforated steel top", "a table with a wire mesh top",
-    "a table with an anti-static gray top", "a table with a yellow safety top",
-    "a table with a wood top and black steel legs", "a table with a white top and wooden legs",
+    "plain gray metal", "old scratched wood", "slightly scratched steel", "glossy white laminate", "gray plastic",
+    "stainless steel", "brushed aluminum", "polished chrome", "rusty steel", "galvanized steel",
+    "blue powder-coated metal", "green metal with chipped paint", "diamond-pattern steel plate", "perforated steel",
+    "marble-look laminate", "white marble", "black marble", "granite", "white quartz", "black slate", "concrete",
+    "terrazzo", "light oak", "dark walnut", "pine with visible grain", "bamboo", "birch plywood", "teak", "cherry wood",
+    "maple", "butcher block wood", "reclaimed wood planks", "black painted wood", "white painted wood",
+    "red painted wood", "beige laminate", "gray laminate", "wood-look laminate", "matte black laminate",
+    "light blue laminate", "mint green laminate", "orange laminate", "white melamine", "unfinished MDF board",
+    "OSB board", "black epoxy resin", "black lab resin", "white lab resin", "gray linoleum", "dark green linoleum",
+    "ceramic tiles", "mosaic tiles", "cork", "leather", "short gray carpet", "a flat green cutting mat",
+    "a flat black rubber mat", "a flat anti-static gray mat", "yellow safety paint", "flat kraft paper",
 ]
 
 # Indoor lighting = source + color + level. Used as "The lighting is {source}, {color}, {level}."
@@ -378,7 +371,8 @@ def draw(demo: int, seed: int, used: set | None = None, attempt: int = 0, tag: s
 
 def sentence(v: dict) -> str:
     """The variation as text for the prompt."""
-    return (f"The scene is in {v['place']}. The table is {v['table']}. The lighting is {v['lighting']}. {v['robot']} "
+    return (f"The scene is in {v['place']}. The table top is {v['table']}. The lighting is {v['lighting']}. "
+            f"{v['robot']} "
             f"The towel is {v['towel_color']} {v['towel_material']}, {v['towel_pattern']}.")
 
 
