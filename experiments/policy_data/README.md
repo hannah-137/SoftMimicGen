@@ -10,6 +10,10 @@ made with Cosmos3. Needs only upstream SoftMimicGen and this folder.
 - Extra observations per camera in the hdf5: `*_geoedge` (edges), `*_depth_raw`, `*_normals_raw`,
   `*_instance_raw` (raw renderer outputs, float32 / int32). The instance id table is saved as json.
 - `--seed` sets the generation seed (default 1, the upstream value). Same seed = same generation choices.
+- `--camera_noise_pos 0.05 --camera_noise_rot 5` moves the room camera by a random offset once per demo (uniform,
+  +-5 cm on each axis and +-5 degrees on each axis). A draw is kept only when the whole towel is inside the image
+  at the start (a small margin); otherwise the generator draws again. Default 0 = fixed camera. The wrist camera
+  never changes. The room camera pose of every step is in `obs/agentview_camera_pose` (x, y, z, qw, qx, qy, qz).
 - Size: about 600 MB per demo with the raw data (50 demos = 30 GB). Write to a data disk. `--no_raw` gives
   about 100 MB per demo.
 
@@ -45,11 +49,17 @@ Each demo in the hdf5 (`data/demo_N`) has `actions` (T, 7), `obs/agentview_image
 and the raw renderer data `*_depth_raw` (float32 m), `*_normals_raw` (float32), `*_instance_raw` (int32).
 T is the number of control steps (20 Hz for the Franka towel task).
 
-Real-looking videos with Cosmos3. First put reference images (made from `ref_sim`, aspect 2:1) in
-`<run_dir>/refs/000-049/` (the folder of the demo) as `demo_NNN_<tag>.png` (several per demo, one video per
-image) or `demo_NNN.png`. Then check them, then run:
+Real-looking videos with Cosmos3. First make one reference image per demo (a realistic version of `ref_sim`, aspect
+2:1). `make_references.py` does this with the OpenAI image edit API (the ChatGPT image model): every demo gets its own
+scene from `variations.py` (environment, table, lighting, robot state, towel color and material; no two demos share a
+combination), and `refs/references.csv` records the variation, the prompt, the tokens and the cost. You can also put
+your own images in `<run_dir>/refs/000-049/` (the folder of the demo) as `demo_NNN_<tag>.png` (several per demo, one
+video per image) or `demo_NNN.png`. Then check them, then run:
 
+    export OPENAI_API_KEY=...
+    python experiments/policy_data/make_references.py <run_dir>            # --dry_run prints the prompts only
     python experiments/policy_data/checks/check_references.py <run_dir>
+    python experiments/policy_data/make_references.py <run_dir> --retry    # only the images that failed the check
     python experiments/policy_data/run_cosmos.py <run_dir> --framework <cosmos-framework> \
         --checkpoint <Cosmos3-Super-fp8> --hf_home <hf cache> --gpus 2,3 --cp 2
 
@@ -75,14 +85,19 @@ Folder names are fixed by the scripts. Do not rename them or add words.
 
 - `make_demos.sh` - runs generation and videos.
 - `generate_demos.py` - upstream generation plus the camera settings and observations above.
-- `observations.py` - `GeoEdgeImage` (copied from the fork) and `RawCameraImage`.
+- `observations.py` - `GeoEdgeImage` (copied from the fork), `RawCameraImage` and `camera_pose`.
+- `events.py` - the random camera move at reset.
 - `make_videos.py` - videos, sheets, summary (no GPU).
 - `layout.py` - the folder rules (50 demos per folder).
+- `make_references.py`, `variations.py` - reference images with the OpenAI image API, one scene variation per demo.
 - `checks/check_references.py` - size and layout check of the reference images.
 - `checks/check_towel_stuck.py` - finds demos where the towel still hangs on the gripper at the last frame.
+- `checks/check_towel_in_view.py` - finds demos where the towel touches the image border in any frame.
 - `run_cosmos.py`, `cosmos_launch.py` - Cosmos3 video2video with the edge control video.
 
 ## Needs
 
 SoftMimicGen installed as in its README (Isaac Sim, Isaac Lab, annotated datasets). For videos: h5py, numpy,
-opencv-python, imageio, imageio-ffmpeg, ffmpeg. For Cosmos3: cosmos-framework with its `.venv` and a checkpoint.
+opencv-python, imageio, imageio-ffmpeg, ffmpeg. For reference images: the `openai` package and an OpenAI API key in
+`OPENAI_API_KEY` (paid, about $0.05 per image at quality medium). For Cosmos3: cosmos-framework with its `.venv` and a
+checkpoint.

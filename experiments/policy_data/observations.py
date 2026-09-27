@@ -163,3 +163,12 @@ class RawCameraImage(ManagerTermBase):
             else:
                 out[i] = t.reshape(height, width, 1).float()
         return out
+
+
+def camera_pose(env, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+    """(N, 7) pose of a camera in the world frame: position x, y, z and quaternion w, x, y, z (world convention).
+    Recorded at every step. For a fixed camera the value is the same inside a demo."""
+    cam = env.scene[sensor_cfg.name]
+    if cam.data.pos_w is None or cam.data.quat_w_world is None:  # manager init, before the first render
+        return torch.zeros(env.num_envs, 7, device=env.device)
+    return torch.cat([cam.data.pos_w, cam.data.quat_w_world], dim=-1)

@@ -1,0 +1,208 @@
+"""Make reference images from the frame-0 images with the OpenAI image edit API (the ChatGPT image model).
+
+  export OPENAI_API_KEY=...
+  python experiments/policy_data/make_references.py <run_dir> [--demos 2 7] [--seed 0] [--mode wide|lab]
+      [--model gpt-image-2] [--quality medium] [--size 2048x1024] [--tag 01] [--workers 3] [--retry] [--dry_run]
+
+Input: <run_dir>/ref_sim/000-049/demo_NNN_ref_sim.png (frame 0, room | wrist, 1024x512, made by make_videos.py).
+Output: <run_dir>/refs/000-049/demo_NNN_<tag>.png (1024x512) and <run_dir>/refs/references.csv with one row per
+image: the variation (environment, table, lighting, robot, towel), the prompt, the tokens and the cost.
+
+Every image gets its own variation from variations.py (demo index + seed). No two images in the csv share a
+combination. The prompt is static on purpose: no action words (they make the model fold the towel), and it lists
+what must stay the same. The API has no seed, so the same call twice gives two different images.
+
+Sizes: the API needs at least 655,360 pixels, so the image is made at 2048x1024 and resized to 1024x512.
+Flow: make_references.py -> checks/check_references.py -> make_references.py --retry -> check again -> run_cosmos.py
+--retry reads refs/failed_references.txt, moves the failed images to refs/rejected/ and makes them again with a
+new seed (seed + 1000 * attempt), so the variation changes too. Images that already exist are skipped.
+--dry_run prints the prompts and writes nothing. It needs no API key.
+Needs: pip install openai opencv-python numpy. Cost per image is printed from the usage of every call.
+"""
+
+import argparse
+import base64
+import csv
+import glob
+import os
+import sys
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+
+import cv2
+import numpy as np
+
+import layout
+import variations
+
+OUT_W, OUT_H = 1024, 512
+PROMPT = (
+    "Turn this simulator image into a realistic photo. It is a split screen: left the room camera, right the camera on "
+    "the robot gripper. Keep the exact same camera viewpoint and framing in both halves, the same robot in the same "
+    "pose, and the same towel in exactly the same position, shape, size and orientation. Do not add, remove, move, "
+    "fold, bend or reshape anything. There is exactly one towel, flat on the table. {variation} The towel has the "
+    "same color and texture on both sides. Change only the materials, textures, lighting and background. "
+    "No text, no logos, no watermark."
+)
+# USD per 1M tokens, gpt-image-2 standard rate (2026-09). Only for the cost column; the bill is what OpenAI charges.
+PRICE = {"text": 5.0, "image_in": 8.0, "image_out": 30.0}
+COLUMNS = ["demo", "name", "attempt", "seed", "mode", "model", "quality", "size", *variations.FIELDS, "prompt",
+           "input_tokens", "output_tokens", "cost_usd", "seconds", "finished_at"]
+RETRY_WAIT = [15, 30, 60, 120, 240]  # seconds between tries after a rate limit or a server error
+
+
+def read_rows(path: str) -> list:
+    return list(csv.DictReader(open(path))) if os.path.isfile(path) else []
+
+
+def failed_names(refs: str) -> list:
+    """Names in refs/failed_references.txt that have an image (a "missing" demo has none and is made normally)."""
+    path = f"{refs}/failed_references.txt"
+    if not os.path.isfile(path):
+        sys.exit(f"{path} not found: run checks/check_references.py first")
+    names = []
+    for line in open(path):
+        name, _, reason = line.strip().partition(":")
+        if name and "missing" not in reason:
+            names.append(name)
+    return names
+
+
+def cost_usd(usage) -> float:
+    det = getattr(usage, "input_tokens_details", None)
+    text = getattr(det, "text_tokens", 0) or 0
+    image = getattr(det, "image_tokens", 0) or 0
+    out = getattr(usage, "output_tokens", 0) or 0
+    return (text * PRICE["text"] + image * PRICE["image_in"] + out * PRICE["image_out"]) / 1e6
+
+
+def edit_image(client, model: str, src: str, prompt: str, size: str, quality: str):
+    """One API call with retries on rate limits and server errors. Returns (image BGR, usage)."""
+    import openai
+
+    for i, wait in enumerate(RETRY_WAIT + [None]):
+        try:
+            with open(src, "rb") as f:
+                r = client.images.edit(model=model, image=f, prompt=prompt, size=size, quality=quality)
+            data = base64.b64decode(r.data[0].b64_json)
+            img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+            if img is None:
+                raise RuntimeError("the API returned an image that cannot be decoded")
+            return img, r.usage
+        except (openai.RateLimitError, openai.APIConnectionError, openai.InternalServerError) as e:
+            if wait is None:
+                raise
+            print(f"  {type(e).__name__}, retry in {wait} s", flush=True)
+            time.sleep(wait)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("run_dir")
+    ap.add_argument("--demos", type=int, nargs="*", default=None, help="demo indices (default: every ref_sim image)")
+    ap.add_argument("--seed", type=int, default=0, help="variation seed (default 0)")
+    ap.add_argument("--mode", choices=["wide", "lab"], default="wide", help="wide: every environment; lab: labs only")
+    ap.add_argument("--model", default="gpt-image-2")
+    ap.add_argument("--quality", default="medium", help="low, medium, high (auto = the API decides)")
+    ap.add_argument("--size", default="2048x1024", help="size the API makes; the file is resized to 1024x512")
+    ap.add_argument("--tag", default="01", help="reference number in the file name: demo_NNN_<tag>.png")
+    ap.add_argument("--workers", type=int, default=3, help="parallel API calls")
+    ap.add_argument("--retry", action="store_true", help="make the images in refs/failed_references.txt again")
+    ap.add_argument("--dry_run", action="store_true", help="print the prompts, call nothing")
+    args = ap.parse_args()
+
+    run = os.path.abspath(args.run_dir)
+    refs = f"{run}/refs"
+    csv_path = f"{refs}/references.csv"
+    rows = read_rows(csv_path)
+    used = {tuple(r[f] for f in variations.FIELDS) for r in rows}
+    attempts = {}
+    for r in rows:
+        attempts[r["name"]] = max(attempts.get(r["name"], 0), int(r.get("attempt") or 0) + 1)
+
+    if args.retry:
+        names = failed_names(refs)
+        idxs = [layout.demo_index(n) for n in names if n.endswith(f"_{args.tag}")]
+    elif args.demos is not None:
+        idxs = args.demos
+    else:
+        files = glob.glob(f"{run}/ref_sim/*/demo_*_ref_sim.png")
+        idxs = sorted(layout.demo_index(os.path.basename(f)) for f in files)
+    if not idxs:
+        sys.exit("nothing to do")
+
+    jobs = []
+    for idx in idxs:
+        name = f"{layout.demo_name(idx)}_{args.tag}"
+        src = f"{layout.ref_sim_dir(run, idx)}/{layout.demo_name(idx)}_ref_sim.png"
+        dst = f"{layout.ref_dir(refs, idx)}/{name}.png"
+        if not os.path.isfile(src):
+            sys.exit(f"missing: {src}")
+        if os.path.isfile(dst) and not args.retry:
+            print(f"{name}: exists, skipped", flush=True)
+            continue
+        attempt = attempts.get(name, 0)
+        seed = args.seed + 1000 * attempt
+        v = variations.draw(idx, seed, args.mode, used)
+        used.add(variations.key(v))
+        jobs.append((idx, name, attempt, seed, src, dst, v, PROMPT.format(variation=variations.sentence(v))))
+
+    if args.dry_run:
+        for idx, name, attempt, seed, src, dst, v, prompt in jobs:
+            print(f"{name} (attempt {attempt}, seed {seed}): {variations.sentence(v)}")
+        print(f"{len(jobs)} images, {args.model} {args.quality} {args.size}, no API call")
+        return
+    if not os.environ.get("OPENAI_API_KEY"):
+        sys.exit("OPENAI_API_KEY is not set")
+    try:
+        from openai import OpenAI
+    except ImportError:
+        sys.exit("pip install openai")
+    client = OpenAI()
+    lock = threading.Lock()
+    results = {"ok": 0, "cost": 0.0, "failed": []}
+
+    def work(job):
+        idx, name, attempt, seed, src, dst, v, prompt = job
+        t0 = time.time()
+        try:
+            img, usage = edit_image(client, args.model, src, prompt, args.size, args.quality)
+        except Exception as e:  # noqa: BLE001 - one bad image must not stop the batch
+            with lock:
+                results["failed"].append(name)
+            print(f"{name}: FAILED {type(e).__name__}: {e}", flush=True)
+            return
+        if args.retry and os.path.isfile(dst):
+            os.makedirs(f"{refs}/rejected", exist_ok=True)
+            os.replace(dst, f"{refs}/rejected/{name}_try{attempt}.png")
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        cv2.imwrite(dst, cv2.resize(img, (OUT_W, OUT_H), interpolation=cv2.INTER_AREA))
+        cost = cost_usd(usage)
+        row = {"demo": idx, "name": name, "attempt": attempt, "seed": seed, "mode": args.mode, "model": args.model,
+               "quality": args.quality, "size": args.size, **v, "prompt": prompt,
+               "input_tokens": getattr(usage, "input_tokens", ""), "output_tokens": getattr(usage, "output_tokens", ""),
+               "cost_usd": round(cost, 4), "seconds": round(time.time() - t0, 1),
+               "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+        with lock:
+            new = not os.path.isfile(csv_path)
+            os.makedirs(refs, exist_ok=True)
+            with open(csv_path, "a", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=COLUMNS)
+                if new:
+                    w.writeheader()
+                w.writerow(row)
+            results["ok"] += 1
+            results["cost"] += cost
+        print(f"{name}: ok, ${cost:.3f}, {row['seconds']} s", flush=True)
+
+    with ThreadPoolExecutor(max_workers=args.workers) as ex:
+        list(ex.map(work, jobs))
+    print(f"{results['ok']}/{len(jobs)} images, ${results['cost']:.2f} -> {refs} (csv: {csv_path})")
+    if results["failed"]:
+        print(f"failed: {', '.join(results['failed'])}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

@@ -9,6 +9,9 @@ demos, failed demos in <output>_failed.hdf5). This script only changes:
   --seed          generation seed (default 1 = upstream). Same seed gives the same generation choices
                   (start poses, noise). The physics on the GPU is not bit-exact, so pixels can differ a little.
   --far_clip      far clipping plane of both cameras in m (default: keep the task's value, 2 m for Franka)
+  --camera_noise_pos, --camera_noise_rot
+                  move the room camera by a random offset at every reset: uniform +-m on x, y, z and +-deg on
+                  roll, pitch, yaw (default 0 = fixed camera, the upstream behavior). Drawn once per demo.
 
 and it records extra observations for both cameras (see observations.py):
 
@@ -16,6 +19,8 @@ and it records extra observations for both cameras (see observations.py):
   <camera>_depth_raw      (H, W, 1) float32, meters      raw depth (skip with --no_raw)
   <camera>_normals_raw    (H, W, 3) float32              raw surface normals
   <camera>_instance_raw   (H, W, 1) int32                raw instance id
+
+  <room>_camera_pose      (7,) float32                   room camera pose in the world frame: x, y, z, qw, qx, qy, qz
 
 <camera> is the camera name without "_image". The instance id table is saved next to the hdf5 as
 <output>_instance_ids.json. Run inside the SoftMimicGen environment from the repository root. make_demos.sh
@@ -45,6 +50,8 @@ parser.add_argument("--no_raw", action="store_true", default=False, help="Do not
 parser.add_argument("--far_clip", type=float, default=None, help="Far clipping plane of both cameras in m (default: task value).")
 parser.add_argument("--depth_jump", type=float, default=0.02, help="Edge rule: depth difference in m.")
 parser.add_argument("--normal_angle", type=float, default=25.0, help="Edge rule: surface normal angle in degrees.")
+parser.add_argument("--camera_noise_pos", type=float, default=0.0, help="Room camera: random offset per demo, +- m on each axis.")
+parser.add_argument("--camera_noise_rot", type=float, default=0.0, help="Room camera: random rotation per demo, +- degrees on each axis.")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
@@ -67,7 +74,7 @@ import torch  # noqa: E402
 import omni  # noqa: E402
 
 from isaaclab.envs import ManagerBasedRLMimicEnv  # noqa: E402
-from isaaclab.managers import ObservationTermCfg, SceneEntityCfg  # noqa: E402
+from isaaclab.managers import EventTermCfg, ObservationTermCfg, SceneEntityCfg  # noqa: E402
 
 import softmimicgen.envs  # noqa: F401, E402
 
@@ -79,6 +86,7 @@ from softmimicgen.datagen.utils import get_env_name_from_dataset, setup_output_p
 import softmimicgen_tasks  # noqa: F401, E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import events  # noqa: E402
 import observations  # noqa: E402
 
 
@@ -120,6 +128,16 @@ def configure(env_cfg, args) -> None:
         for term_name, term in terms.items():
             setattr(policy, term_name, term)
         print(f"[policy_data] {name}: observations {', '.join(terms)}")
+    room = term_prefix(args.room_camera)
+    getattr(env_cfg.scene, args.room_camera).update_latest_camera_pose = True  # else a fixed camera keeps its first pose in data
+    setattr(policy, f"{room}_camera_pose", ObservationTermCfg(func=observations.camera_pose, params={"sensor_cfg": SceneEntityCfg(args.room_camera)}))
+    if args.camera_noise_pos > 0 or args.camera_noise_rot > 0:
+        env_cfg.events.randomize_room_camera = EventTermCfg(
+            func=events.randomize_camera_pose,
+            mode="reset",
+            params={"sensor_cfg": SceneEntityCfg(args.room_camera), "pos_range_m": args.camera_noise_pos, "rot_range_deg": args.camera_noise_rot},
+        )
+        print(f"[policy_data] {args.room_camera}: random pose per demo, +-{args.camera_noise_pos} m, +-{args.camera_noise_rot} deg")
     print(f"[policy_data] seed {args.seed}")
 
 
