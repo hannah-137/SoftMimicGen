@@ -9,14 +9,16 @@ Output: <run_dir>/refs/000-049/demo_NNN_<tag>.png (1024x512) and <run_dir>/refs/
 image: the 7 axes and the place type, the prompt, the tokens and the cost.
 
 Every image gets its own variation from variations.py (demo index, seed, tag, attempt): all 7 axes change, the
-place types are exact in every group of 50 demos, and no two images in the csv share a combination. The prompt is static on purpose: no action words (they make the model fold the towel),
-and it lists what must stay the same. The API has no seed, so the same call twice gives two different images.
+place types are exact in every group of 50 demos, and no two images in the csv share a combination. The prompt is
+static on purpose: no action words (they make the model fold the towel), and it lists what must stay the same. The
+API has no seed, so the same call twice gives two different images.
 
 Size: the API needs at least 655,360 pixels, so the image is made at 2048x1024 and resized to 1024x512.
 Flow: make_references.py -> checks/check_references.py -> make_references.py --retry -> check again -> run_cosmos.py
 --retry reads refs/failed_references.txt. It makes the failed and the missing images with this --tag again, as a new
 attempt: same place type, new combination. The replaced image goes to <run_dir>/refs_rejected/.
-An image in the wrong folder is not made again: move it. Images that already exist are skipped (without --retry).
+An image in the wrong folder is not made again, even when its demo counts as missing: move it.
+Images that already exist are skipped (without --retry).
 --dry_run prints the prompt and the variations and writes nothing. It needs no API key.
 The run stops when the account has no credit left (insufficient_quota). Rate limits and server errors are retried.
 Needs: pip install openai opencv-python numpy. Cost per image is printed from the usage of every call.
@@ -79,16 +81,16 @@ def retry_list(refs: str, tag: str) -> list:
     path = f"{refs}/failed_references.txt"
     if not os.path.isfile(path):
         sys.exit(f"{path} not found: run checks/check_references.py first")
+    lines = [(n, r.strip()) for n, _, r in (line.strip().partition(":") for line in open(path)) if n]
+    # A demo whose image is only in the wrong folder is also "missing". Moving the file fixes both, so no API call.
+    moved = {layout.demo_index(n) for n, r in lines if r.startswith("wrong folder")}
     idxs = []
-    for line in open(path):
-        name, _, reason = line.strip().partition(":")
-        reason = reason.strip()
-        if not name:
-            continue
-        if reason == "missing":  # the name is demo_NNN, no image yet
-            idxs.append(layout.demo_index(name))
-        elif reason.startswith("wrong folder"):
+    for name, reason in lines:
+        if reason.startswith("wrong folder"):
             print(f"{name}: {reason} (not made again)", flush=True)
+        elif reason == "missing":  # the name is demo_NNN, no image yet
+            if layout.demo_index(name) not in moved:
+                idxs.append(layout.demo_index(name))
         elif name.endswith(f"_{tag}"):
             idxs.append(layout.demo_index(name))
         else:

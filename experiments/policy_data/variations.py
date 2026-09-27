@@ -236,19 +236,19 @@ TABLES = [
     "covered with a black rubber mat", "a light oak desk", "a dark walnut table", "a pine table with visible grain",
     "a bamboo table", "a birch plywood table", "a black painted wooden table", "a white painted wooden table",
     "a red painted workbench", "a blue metal table with a powder coat finish", "a green metal table with chipped paint",
-    "a brushed aluminum table", "a polished chrome table", "a rusty steel table", "a concrete table", "a granite counter",
-    "a white quartz counter", "a black slate table", "a glass table with a metal frame", "a frosted glass table",
-    "a clear acrylic table", "a beige laminate office desk", "a gray laminate office desk", "a wood-look laminate table",
-    "a table covered with a white tablecloth", "a table covered with a blue tablecloth",
+    "a brushed aluminum table", "a polished chrome table", "a rusty steel table", "a concrete table",
+    "a granite counter", "a white quartz counter", "a black slate table", "a glass table with a metal frame",
+    "a frosted glass table", "a clear acrylic table", "a beige laminate office desk", "a gray laminate office desk",
+    "a wood-look laminate table", "a table covered with a white tablecloth", "a table covered with a blue tablecloth",
     "a table covered with a red checkered cloth", "a table covered with a gray felt cloth",
     "a table covered with kraft paper", "a table covered with a thin foam sheet",
     "a table covered with a wooden cutting board", "a ceramic tiled table", "a mosaic tiled table", "a cork-top table",
     "a leather-top desk", "a carpet-covered platform", "a wooden picnic table", "a wooden kitchen island",
     "a butcher block counter", "a lab bench with a black resin top", "a lab bench with a white resin top",
-    "a hospital bed table", "a folding camping table", "a wooden pallet on a stand", "an ironing board style padded table",
-    "a table with a perforated steel top", "a table with a wire mesh top", "a table with an anti-static gray top",
-    "a table with a yellow safety top", "a table with a wood top and black steel legs",
-    "a table with a white top and wooden legs",
+    "a hospital bed table", "a folding camping table", "a wooden pallet on a stand",
+    "an ironing board style padded table", "a table with a perforated steel top", "a table with a wire mesh top",
+    "a table with an anti-static gray top", "a table with a yellow safety top",
+    "a table with a wood top and black steel legs", "a table with a white top and wooden legs",
 ]
 
 # Indoor lighting = source + color + level. Used as "The lighting is {source}, {color}, {level}."
@@ -298,19 +298,21 @@ ROBOTS = [
 
 # Used as "The towel is {color} {material}, {pattern}."
 TOWEL_COLORS = [
-    "white", "off-white", "ivory", "cream", "beige", "sand", "tan", "khaki", "light gray", "gray",
-    "dark gray", "charcoal", "black", "silver gray", "warm gray", "cool gray", "taupe", "mushroom", "light brown", "brown",
+    "white", "off-white", "ivory", "cream", "beige", "sand", "tan", "khaki", "light gray", "gray", "dark gray",
+    "charcoal", "black", "silver gray", "warm gray", "cool gray", "taupe", "mushroom", "light brown", "brown",
     "dark brown", "chocolate", "coffee", "caramel", "rust", "terracotta", "brick red", "red", "dark red", "wine red",
     "burgundy", "cherry red", "coral", "salmon", "peach", "apricot", "orange", "burnt orange", "amber", "mustard",
-    "yellow", "pale yellow", "lemon", "gold", "olive", "olive green", "moss green", "forest green", "dark green", "green",
-    "bright green", "lime", "mint", "sage", "sea green", "teal", "dark teal", "turquoise", "aqua", "cyan",
-    "sky blue", "light blue", "baby blue", "powder blue", "blue", "royal blue", "cobalt blue", "navy", "dark navy", "denim blue",
-    "steel blue", "slate blue", "periwinkle", "lavender", "lilac", "violet", "purple", "dark purple", "plum", "grape",
-    "magenta", "fuchsia", "hot pink", "pink", "light pink", "blush pink", "dusty rose", "rose", "mauve", "berry",
-    "pale green", "pale blue", "pale pink", "pale lavender", "stone", "oatmeal", "linen white", "smoke gray", "ash gray", "pewter",
+    "yellow", "pale yellow", "lemon", "gold", "olive", "olive green", "moss green", "forest green", "dark green",
+    "green", "bright green", "lime", "mint", "sage", "sea green", "teal", "dark teal", "turquoise", "aqua", "cyan",
+    "sky blue", "light blue", "baby blue", "powder blue", "blue", "royal blue", "cobalt blue", "navy", "dark navy",
+    "denim blue", "steel blue", "slate blue", "periwinkle", "lavender", "lilac", "violet", "purple", "dark purple",
+    "plum", "grape", "magenta", "fuchsia", "hot pink", "pink", "light pink", "blush pink", "dusty rose", "rose",
+    "mauve", "berry", "pale green", "pale blue", "pale pink", "pale lavender", "stone", "oatmeal", "linen white",
+    "smoke gray", "ash gray", "pewter",
 ]
 TOWEL_MATERIALS = [
-    "terry cloth", "microfiber", "linen", "waffle-weave cotton", "fleece", "plain cotton", "bamboo fiber", "knit cotton",
+    "terry cloth", "microfiber", "linen", "waffle-weave cotton", "fleece", "plain cotton", "bamboo fiber",
+    "knit cotton",
 ]
 TOWEL_PATTERNS = [
     "plain, one solid color",
@@ -325,7 +327,8 @@ FIELDS = ["place", "table", "lighting", "robot", "towel_color", "towel_material"
 
 
 def block_types() -> list:
-    """The place types of one group of BLOCK demos: OUTDOOR_SHARE outdoor, the rest split equally over the indoor types."""
+    """The place types of one group of BLOCK demos: OUTDOOR_SHARE outdoor, the rest split equally over the indoor
+    types."""
     indoor = [t for t in PLACES if t != "outdoor"]
     n_out = round(BLOCK * OUTDOOR_SHARE)
     n_in = (BLOCK - n_out) // len(indoor)
@@ -356,7 +359,8 @@ def draw(demo: int, seed: int, used: set | None = None, attempt: int = 0, tag: s
         if ptype == "outdoor":
             lighting = rng.choice(OUTDOOR_LIGHTS)
         else:
-            lighting = f"{rng.choice(INDOOR_LIGHT_SOURCES)}, {rng.choice(INDOOR_LIGHT_COLORS)}, {rng.choice(INDOOR_LIGHT_LEVELS)}"
+            source, color = rng.choice(INDOOR_LIGHT_SOURCES), rng.choice(INDOOR_LIGHT_COLORS)
+            lighting = f"{source}, {color}, {rng.choice(INDOOR_LIGHT_LEVELS)}"
         v = {
             "place_type": ptype,
             "place": rng.choice(PLACES[ptype]),
@@ -381,7 +385,8 @@ def sentence(v: dict) -> str:
 if __name__ == "__main__":
     n_places = {t: len(p) for t, p in PLACES.items()}
     print(f"places {sum(n_places.values())} {n_places}")
-    print(f"tables {len(TABLES)}, indoor lighting {len(INDOOR_LIGHT_SOURCES) * len(INDOOR_LIGHT_COLORS) * len(INDOOR_LIGHT_LEVELS)}, "
+    n_indoor_light = len(INDOOR_LIGHT_SOURCES) * len(INDOOR_LIGHT_COLORS) * len(INDOOR_LIGHT_LEVELS)
+    print(f"tables {len(TABLES)}, indoor lighting {n_indoor_light}, "
           f"outdoor lighting {len(OUTDOOR_LIGHTS)}, robots {len(ROBOTS)}, towel colors {len(TOWEL_COLORS)}, "
           f"materials {len(TOWEL_MATERIALS)}, patterns {len(TOWEL_PATTERNS)}")
     print(sentence(draw(2, 0)))
