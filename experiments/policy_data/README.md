@@ -9,7 +9,8 @@ made with Cosmos3. Needs only upstream SoftMimicGen and this folder.
   the scene changes.
 - Extra observations per camera in the hdf5: `*_geoedge` (edges), `*_depth_raw`, `*_normals_raw`,
   `*_instance_raw` (raw renderer outputs, float32 / int32). The instance id table is saved as json.
-- `--seed` sets the generation seed (default 1, the upstream value). Same seed = same generation choices.
+- `--seed` sets the generation seed (default 1, the upstream value). The same seed does not give the same hdf5
+  file: the GPU physics differs slightly between runs.
 - `--camera_noise_pos 0.05 --camera_noise_rot 5` moves the room camera by a random offset once per demo (uniform,
   +-5 cm on each axis and +-5 degrees on each axis). A draw is kept only when the whole towel is inside the image
   at the start (a small margin); otherwise the generator draws again. Default 0 = fixed camera. The wrist camera
@@ -88,6 +89,7 @@ Folder names are fixed by the scripts. Do not rename them or add words.
 ## Files
 
 - `make_demos.sh` - runs generation and videos.
+- `setup.sh` - extra packages on top of the SoftMimicGen environment (openai).
 - `generate_demos.py` - upstream generation plus the camera settings and observations above.
 - `observations.py` - `GeoEdgeImage` (copied from the fork), `RawCameraImage` and `camera_pose`.
 - `events.py` - the random camera move at reset.
@@ -103,6 +105,6 @@ Folder names are fixed by the scripts. Do not rename them or add words.
 ## Needs
 
 SoftMimicGen installed as in its README (Isaac Sim, Isaac Lab, annotated datasets). For videos: h5py, numpy,
-opencv-python, imageio, imageio-ffmpeg, ffmpeg. For reference images: the `openai` package and an OpenAI API key in
-`OPENAI_API_KEY` (paid, about $0.05 per image at quality medium). For Cosmos3: cosmos-framework with its `.venv` and a
-checkpoint.
+opencv-python, imageio, imageio-ffmpeg, ffmpeg. For reference images: the `openai` package
+(`bash experiments/policy_data/setup.sh`) and an OpenAI API key in `OPENAI_API_KEY` (paid, about $0.05 per image at
+quality medium). For Cosmos3: cosmos-framework with its `.venv` and a checkpoint.
