@@ -1,6 +1,6 @@
 """Check reference images before video generation. No GPU needed. Run it as often as you like.
 
-  python experiments/policy_data/check_references.py <run_dir> [--refs <folder>] [--no_layout]
+  python experiments/policy_data/checks/check_references.py <run_dir> [--refs <folder>] [--no_layout]
 
 Input: the demo hdf5 in <run_dir> and the reference images in <run_dir>/refs/000-049/, <run_dir>/refs/050-099/, ...
 (the folder of the demo, 50 demos per folder, see layout.py), named demo_NNN_<tag>.png (several images per demo,

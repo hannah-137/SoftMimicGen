@@ -34,9 +34,10 @@ This writes a new folder. Videos are 81 frames at 16 fps; `--all_frames` keeps e
                 video, 1 px line between the views), demo_NNN_depth.mp4, demo_NNN_normals.mp4,
                 demo_NNN_instance.mp4 (views of the raw data)
       ref_sim/000-049/   demo_NNN_ref_sim.png (frame 0 of every demo, the base for the reference images)
-      refs/000-049/   your reference images demo_NNN_TT.png, in the folder of their demo;
-                refs/check_references.csv (+ failed_references.txt, and check_<name>.png next to the image,
-                only when something fails)
+      refs/000-049/   reference images demo_NNN_TT.png, in the folder of their demo; refs/references.csv (how
+                each image was made), refs/check_references.csv (+ failed_references.txt, and check_<name>.png
+                next to the image, only when something fails)
+      refs_rejected/   images replaced by make_references.py --retry
       cosmos/<checkpoint>_<date>_<time>/000-049/   per reference: <name>.mp4 (the video) and <name>.json (the
                 settings the framework used); run_config.json, run.log, debug.log, benchmark.json at the top
 
@@ -49,17 +50,20 @@ Each demo in the hdf5 (`data/demo_N`) has `actions` (T, 7), `obs/agentview_image
 and the raw renderer data `*_depth_raw` (float32 m), `*_normals_raw` (float32), `*_instance_raw` (int32).
 T is the number of control steps (20 Hz for the Franka towel task).
 
-Real-looking videos with Cosmos3. First make one reference image per demo (a realistic version of `ref_sim`, aspect
-2:1). `make_references.py` does this with the OpenAI image edit API (the ChatGPT image model): every demo gets its own
-scene from `variations.py` (environment, table, lighting, robot state, towel color and material; no two demos share a
-combination), and `refs/references.csv` records the variation, the prompt, the tokens and the cost. You can also put
-your own images in `<run_dir>/refs/000-049/` (the folder of the demo) as `demo_NNN_<tag>.png` (several per demo, one
-video per image) or `demo_NNN.png`. Then check them, then run:
+Real-looking videos with Cosmos3. First make one reference image per demo. It is a realistic version of `ref_sim`
+with the same layout, aspect 2:1. `make_references.py` makes it with the OpenAI image edit API (gpt-image-2). Every
+image changes 7 axes at once: place, table, lighting, robot wear, towel color, towel material and towel pattern.
+The lists and the rules are in `variations.py`. The place type comes first. It is exact in every group of 50 demos
+(000-049, ...): 10 outdoor (20%) and 4 of each of the 10 indoor types (8% each). An outdoor place gets outdoor
+lighting. No two images in a run share a combination. `refs/references.csv` records
+the axes, the prompt, the tokens and the cost of every image. You can also put your own images in
+`<run_dir>/refs/000-049/` (the folder of the demo) as `demo_NNN_<tag>.png` (several per demo, one video per image)
+or `demo_NNN.png`. Then check them, then run:
 
     export OPENAI_API_KEY=...
-    python experiments/policy_data/make_references.py <run_dir>            # --dry_run prints the prompts only
+    python experiments/policy_data/make_references.py <run_dir>            # --dry_run: prompts only, no API call
     python experiments/policy_data/checks/check_references.py <run_dir>
-    python experiments/policy_data/make_references.py <run_dir> --retry    # only the images that failed the check
+    python experiments/policy_data/make_references.py <run_dir> --retry    # failed and missing images, new combination
     python experiments/policy_data/run_cosmos.py <run_dir> --framework <cosmos-framework> \
         --checkpoint <Cosmos3-Super-fp8> --hf_home <hf cache> --gpus 2,3 --cp 2
 
@@ -89,7 +93,8 @@ Folder names are fixed by the scripts. Do not rename them or add words.
 - `events.py` - the random camera move at reset.
 - `make_videos.py` - videos, sheets, summary (no GPU).
 - `layout.py` - the folder rules (50 demos per folder).
-- `make_references.py`, `variations.py` - reference images with the OpenAI image API, one scene variation per demo.
+- `make_references.py`, `variations.py` - reference images with the OpenAI image API; the 7 axes, their lists and
+  the rules.
 - `checks/check_references.py` - size and layout check of the reference images.
 - `checks/check_towel_stuck.py` - finds demos where the towel still hangs on the gripper at the last frame.
 - `checks/check_towel_in_view.py` - finds demos where the towel touches the image border in any frame.
