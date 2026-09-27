@@ -20,8 +20,10 @@ attempt: same place type, new combination. The replaced image goes to <run_dir>/
 An image in the wrong folder is not made again, even when its demo counts as missing: move it.
 Images that already exist are skipped (without --retry).
 --dry_run prints the prompt and the variations and writes nothing. It needs no API key.
-The run stops when the account has no credit left (insufficient_quota). Rate limits and server errors are retried.
-Needs: pip install openai opencv-python numpy. Cost per image is printed from the usage of every call.
+The run stops when the account has no credit left (error type insufficient_quota). Rate limits and server errors
+are retried.
+Needs: bash experiments/policy_data/setup.sh (openai), opencv-python, numpy. Cost per image is printed from the
+usage of every call.
 """
 
 import argparse
@@ -56,6 +58,8 @@ PRICE = {"text": 5.0, "image_in": 8.0, "image_out": 30.0}
 COLUMNS = ["demo", "name", "attempt", "seed", "model", "quality", "size", "place_type", *variations.FIELDS, "prompt",
            "input_tokens", "output_tokens", "cost_usd", "seconds", "finished_at"]
 RETRY_WAIT = [15, 30, 60, 120, 240]  # seconds between tries after a rate limit or a server error
+# Error codes of a 429 that means "no credit left" (the error type is insufficient_quota). No retry for these.
+NO_CREDIT_CODES = {"insufficient_quota", "credit_balance_exhausted"}
 
 
 class NoCredit(Exception):
@@ -120,7 +124,7 @@ def edit_image(client, model: str, src: str, prompt: str, size: str, quality: st
                 raise RuntimeError("the API returned an image that cannot be decoded")
             return img, r.usage
         except (openai.RateLimitError, openai.APIConnectionError, openai.InternalServerError) as e:
-            if getattr(e, "code", None) == "insufficient_quota":
+            if getattr(e, "type", None) == "insufficient_quota" or getattr(e, "code", None) in NO_CREDIT_CODES:
                 raise NoCredit(str(e)) from e
             if wait is None:
                 raise
