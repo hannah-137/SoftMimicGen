@@ -320,7 +320,7 @@ TOWEL_PATTERNS = [
     "with a darker border along the edges",
     "with thin stripes",
     "with a small check pattern",
-    "with a two-tone design, one half a lighter shade",
+    "with a subtle herringbone weave",
     "with small dots",
 ]
 
