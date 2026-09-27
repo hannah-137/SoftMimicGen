@@ -56,8 +56,9 @@ with the same layout, aspect 2:1. `make_references.py` makes it with the OpenAI 
 image changes 7 axes at once: place, table, lighting, robot wear, towel color, towel material and towel pattern.
 The lists and the rules are in `variations.py`. The place type comes first. It is exact in every group of 50 demos
 (000-049, ...): 10 outdoor (20%) and 4 of each of the 10 indoor types (8% each). An outdoor place gets outdoor
-lighting. No two images in a run share a combination. `refs/references.csv` records
-the axes, the prompt, the tokens and the cost of every image. You can also put your own images in
+lighting. 2 of every 50 images get strong red, green, blue or yellow light (indoor only, as in CRAFT). No two
+images in a run share a combination. `refs/references.csv` records the axes, the prompt, the tokens and the cost of
+every image. You can also put your own images in
 `<run_dir>/refs/000-049/` (the folder of the demo) as `demo_NNN_<tag>.png` (several per demo, one video per image)
 or `demo_NNN.png`. Then check them, then run:
 

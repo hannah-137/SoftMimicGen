@@ -6,11 +6,13 @@ and towel pattern. All 7 axes change in every image. Generation rules:
   same groups as the demo folders (000-049, 050-099, ...): 10 outdoor (OUTDOOR_SHARE, 20%) and 4 of each of the 10
   indoor types (8% each). The 50 types of a group are shuffled over its demos. Places inside a type have the same
   chance.
-- lighting: indoor lighting for an indoor place, outdoor lighting for an outdoor place.
+- lighting: indoor lighting for an indoor place, outdoor lighting for an outdoor place. In every group of BLOCK
+  demos, STRONG_PER_BLOCK (2, 4%) of the indoor demos get strong colored ambient light instead (red, green, blue or
+  yellow, as in CRAFT).
 - other axes: every item has the same chance.
 - no repeat: draw() never returns a combination whose key() is in `used`.
-A new attempt for the same image (make_references.py --retry) keeps the place type and draws the rest again, so the
-shares stay exact. Each tag (01, 02, ...) has its own shuffle.
+A new attempt for the same image (make_references.py --retry) keeps the place type and the strong light slot and
+draws the rest again, so the shares stay exact. Each tag (01, 02, ...) has its own shuffle.
 
     v = draw(demo=2, seed=0)         # same demo, seed, attempt and tag -> same choice
     text = sentence(v)               # the sentences for the prompt
@@ -21,6 +23,7 @@ import random
 
 OUTDOOR_SHARE = 0.2
 BLOCK = 50  # the place type shares are exact in every group of BLOCK demos
+STRONG_PER_BLOCK = 2  # indoor demos with strong colored light in every group of BLOCK demos (4%)
 
 # Place type -> places. Used as "The scene is in {place}."
 PLACES = {
@@ -250,8 +253,10 @@ INDOOR_LIGHT_SOURCES = [
     "daylight from a window on the right",
     "fluorescent ceiling panels",
     "warm ceiling lamps",
-    "a single desk lamp close to the table",
+    "a warm spot light from above",
     "studio softbox lights from the front",
+    "artificial side light from the left",
+    "artificial side light from the right",
 ]
 INDOOR_LIGHT_COLORS = [
     "with a neutral white tone",
@@ -264,6 +269,9 @@ INDOOR_LIGHT_LEVELS = [
     "medium bright",
     "dim, with soft shadows",
 ]
+# Strong colored ambient light over the whole scene, indoor only. Used as
+# "The lighting is strong {color} ambient light over the whole scene."
+STRONG_LIGHT_COLORS = ["red", "green", "blue", "yellow"]
 # Outdoor lighting. Used as "The lighting is {light}."
 OUTDOOR_LIGHTS = [
     "direct midday sun with hard shadows",
@@ -337,6 +345,15 @@ def place_type(demo: int, seed: int, tag: str = "") -> str:
     return types[demo % BLOCK]
 
 
+def strong_light(demo: int, seed: int, tag: str = "") -> bool:
+    """True for the STRONG_PER_BLOCK indoor slots of the group that get strong colored light."""
+    group = demo // BLOCK
+    types = block_types()
+    random.Random(f"{seed}:{tag}:group{group}").shuffle(types)
+    indoor = [i for i, t in enumerate(types) if t != "outdoor"]
+    return demo % BLOCK in random.Random(f"{seed}:{tag}:group{group}:strong").sample(indoor, STRONG_PER_BLOCK)
+
+
 def key(v: dict) -> tuple:
     """The 7 values that identify one combination."""
     return tuple(v[f] for f in FIELDS)
@@ -347,10 +364,13 @@ def draw(demo: int, seed: int, used: set | None = None, attempt: int = 0, tag: s
     The place type depends on demo, seed and tag only. A combination whose key() is in `used` is skipped, so two
     images never share a combination."""
     ptype = place_type(demo, seed, tag)
+    strong = strong_light(demo, seed, tag)
     rng = random.Random(f"{seed}:{tag}:{demo}:{attempt}")
     for _ in range(1000):
         if ptype == "outdoor":
             lighting = rng.choice(OUTDOOR_LIGHTS)
+        elif strong:
+            lighting = f"strong {rng.choice(STRONG_LIGHT_COLORS)} ambient light over the whole scene"
         else:
             source, color = rng.choice(INDOOR_LIGHT_SOURCES), rng.choice(INDOOR_LIGHT_COLORS)
             lighting = f"{source}, {color}, {rng.choice(INDOOR_LIGHT_LEVELS)}"
@@ -380,7 +400,7 @@ if __name__ == "__main__":
     n_places = {t: len(p) for t, p in PLACES.items()}
     print(f"places {sum(n_places.values())} {n_places}")
     n_indoor_light = len(INDOOR_LIGHT_SOURCES) * len(INDOOR_LIGHT_COLORS) * len(INDOOR_LIGHT_LEVELS)
-    print(f"tables {len(TABLES)}, indoor lighting {n_indoor_light}, "
+    print(f"tables {len(TABLES)}, indoor lighting {n_indoor_light} + strong {len(STRONG_LIGHT_COLORS)}, "
           f"outdoor lighting {len(OUTDOOR_LIGHTS)}, robots {len(ROBOTS)}, towel colors {len(TOWEL_COLORS)}, "
           f"materials {len(TOWEL_MATERIALS)}, patterns {len(TOWEL_PATTERNS)}")
     print(sentence(draw(2, 0)))
