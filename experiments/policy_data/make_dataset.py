@@ -36,9 +36,9 @@ stopped halfway: otherwise it replaces the number once more. Only one --replace 
 (.replace.lock); a second --replace of the same number that waited for it stops.
 A --from run must have the same settings, the same room camera noise as the run of the old demo, and a seed that no
 other run of the dataset has. The run is then added to run_config.json.
-It waits while make_references.py runs on the dataset, or while another process has the hdf5 open. run_cosmos.py
-does not take a lock yet: do not replace a demo while run_cosmos.py runs on the dataset. The old hdf5 data stays in
-its source run. The hdf5 file does not shrink when a demo is replaced (h5repack makes it small again).
+It waits while make_references.py runs on the dataset, or while another process has the hdf5 open. It refuses a
+number that a running run_cosmos.py makes a video for (replace it after that job); other numbers go on. The old hdf5
+data stays in its source run. The hdf5 file does not shrink when a demo is replaced (h5repack makes it small again).
 --runs_dir <folder>: where the source runs are, when the dataset or the runs were moved (default: the relative paths
 in run_config.json).
 """
@@ -401,6 +401,9 @@ def new_plan(args, ds: str, cfg: dict, n: int, data: h5py.Group) -> tuple[str, d
     if not 0 <= n < len(sources):
         sys.exit(f"--replace {n}: the dataset has demos 0-{len(sources) - 1}")
     old = sources[n]
+    claims = status.cosmos_claims(ds)
+    if n in claims:
+        sys.exit(f"demo {n} is in a running Cosmos job (cosmos/{claims[n]}): replace it after that job ends")
     used = {(r["source_run"], int(r["source_demo"])) for r in sources}
     used |= {(r["old_source_run"], int(r["old_source_demo"])) for r in status.read_csv(f"{ds}/replacements.csv")}
     for path in glob.glob(f"{ds}/sim_rejected/*/*/replaced.json"):
@@ -460,8 +463,7 @@ def cancel(ds: str, cfg: dict, n: int) -> None:
     """Drop a stopped replace that has not linked the new demo yet: move the old files back, remove the copy."""
     with status.stop_signals(), status.lock(ds, status.REPLACE_LOCK):
         mark_replace(ds, n)
-        with status.lock(ds, status.REFS_LOCK), status.lock(ds, status.COSMOS_LOCK), \
-                status.open_hdf5(f"{ds}/{cfg['hdf5']}", "r+") as dst:
+        with status.lock(ds, status.REFS_LOCK), status.open_hdf5(f"{ds}/{cfg['hdf5']}", "r+") as dst:
             stopped = [(p, j) for p, j in status.open_replacements(ds) if j.get("demo") == n]
             if not stopped:
                 sys.exit(f"demo {n} has no replace that stopped halfway")
@@ -494,11 +496,10 @@ def replace(args) -> None:
     key, new_key = f"demo_{n}", f"_new_demo_{n}"
     # What demo n looks like before the wait: another --replace of n may finish while this one waits.
     snapshot = (status.current_sources(ds).get(n), rej_folders(ds, n))
-    # One replace at a time; then wait for the long jobs and for the hdf5 (without the list lock).
+    # One replace at a time; then wait for make_references.py and for the hdf5 (without the list lock).
     with status.stop_signals(), status.lock(ds, status.REPLACE_LOCK):
         mark_replace(ds, n)
-        with status.lock(ds, status.REFS_LOCK), status.lock(ds, status.COSMOS_LOCK), \
-                status.open_hdf5(f"{ds}/{cfg['hdf5']}", "r+") as dst:
+        with status.lock(ds, status.REFS_LOCK), status.open_hdf5(f"{ds}/{cfg['hdf5']}", "r+") as dst:
             data = dst["data"]
             stopped = [(p, j) for p, j in status.open_replacements(ds) if j.get("demo") == n]
             if stopped:

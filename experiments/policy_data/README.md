@@ -41,7 +41,8 @@ This writes a new folder. Videos are 81 frames at 16 fps; `--all_frames` keeps e
       refs_rejected/000-049/   images replaced by make_references.py --retry (<name>_attempt<N>.png), and
                 refs_rejected/rejected.csv (their scores and the reason)
       cosmos/<checkpoint>_<date>_<time>/000-049/   per reference: <name>.mp4 (the video) and <name>.json (the
-                settings the framework used); run_config.json, run.log, debug.log, benchmark.json at the top
+                settings the framework used, and policy_data: source demo, reference image and its sha1, seed);
+                run_config.json, run.log, debug.log, benchmark.json at the top
 
 Every folder with per-demo files holds 50 demos: 000-049, 050-099, ... (layout.py). The rule is the same for
 2 demos and for 750.
@@ -74,16 +75,17 @@ or `demo_NNN.png`. Then check them, then run:
 The check rejects images that are not 2:1 and scores the layout (robot and towel where the simulator has them).
 When something fails, `failed_references.txt` lists the images to make again. `--retry` makes at most 3 images per
 demo (`--max_attempts`). Images that were never made (for example after an API error) are made by the same command
-without `--retry`. `run_cosmos.py` only starts when every reference passed; it resizes the images to 1024 x 512
-itself. Its output goes to `<run_dir>/cosmos/<checkpoint name>_<date>_<time>/000-049/`.
+without `--retry`. In a run folder, `run_cosmos.py` only starts when every reference passed; in a dataset folder
+it takes the demos that are ready (see step 6 below). It resizes the images to 1024 x 512 itself. Its output goes
+to `<run_dir>/cosmos/<checkpoint name>_<date>_<time>/000-049/`.
 
 ## Make the dataset (750 demos)
 
 The spec is in `SPEC.md`. Run the commands from the repository root in the SoftMimicGen environment.
-`make_references.py`, `checks/check_references.py` and `status.py` can run again: finished work is skipped.
-`make_demos.sh`, `make_dataset.py --take`, `make_dataset.py --replace` and `run_cosmos.py` do the work again every
-time: run them once per step. (`--replace` without `--reason` only finishes a replace that `status.py` lists as
-stopped halfway.)
+`make_references.py`, `checks/check_references.py`, `run_cosmos.py` (in a dataset folder) and `status.py` can run
+again: finished work is skipped. `make_demos.sh`, `make_dataset.py --take` and `make_dataset.py --replace` do the
+work again every time: run them once per step. (`--replace` without `--reason` only finishes a replace that
+`status.py` lists as stopped halfway.)
 `status.py` prints the state and the next commands.
 
 1. Simulator demos. Make more than needed: demos with the towel out of view are not used, and some demos get
@@ -122,12 +124,16 @@ stopped halfway.)
        python experiments/policy_data/checks/check_references.py <dataset> --demos 0-49
        python experiments/policy_data/make_references.py <dataset> --retry --demos 0-49
 
-6. Cosmos videos, about 12 minutes per video on 2 GPUs. Give exactly the numbers that `status.py` lists for the
-   next command (state `needs_video`). In this version `run_cosmos.py` takes single numbers (no ranges), does
-   not compare the image with its check result, and takes no lock: do not run `--replace` while it runs.
+6. Cosmos videos, about 12 minutes per video on 2 GPUs. The script takes only the demos that are ready (state
+   `needs_video`: the image passed its check, no video yet) and skips the rest, so the same command can run again.
+   With 4 GPUs, run two commands at the same time: each takes other demos (`--max` splits the batch).
 
-       python experiments/policy_data/run_cosmos.py <dataset> --demos <numbers from status.py> \
-           --framework <cosmos-framework> --checkpoint <Cosmos3-Super-fp8> --hf_home <hf cache> --gpus 0,1 --cp 2
+       python experiments/policy_data/run_cosmos.py <dataset> --demos 0-49 --max 25 --gpus 0,1 --cp 2 \
+           --framework <cosmos-framework> --checkpoint <Cosmos3-Super-fp8> --hf_home <hf cache>
+       python experiments/policy_data/run_cosmos.py <dataset> --demos 0-49 --max 25 --gpus 2,3 --cp 2 \
+           --framework <cosmos-framework> --checkpoint <Cosmos3-Super-fp8> --hf_home <hf cache>
+
+   A demo that a running job makes a video for cannot be replaced until that job ends.
 
 7. Review every video, make rejected ones again, and replace demos that fail 3 times. The review page and the
    remake of rejected videos are not in this version yet.
@@ -152,7 +158,8 @@ are hard links to the runs (no extra disk space). The runs stay as they are: `--
                                           of the reference images: variation_seed, tag, max_attempts
 
 The list files. Each file has one writer. Every write happens under the dataset lock (`.lists.lock`, see
-`status.py`), so scripts can run at the same time.
+`status.py`), so scripts can run at the same time. (The run_config.json of a running Cosmos job is written only by
+its own job.)
 
 | File | Writer | Content |
 |---|---|---|
@@ -161,11 +168,15 @@ The list files. Each file has one writer. Every write happens under the dataset 
 | `refs/references.csv` | make_references.py | how each reference image was made (axes, prompt, source demo, cost) |
 | `refs/check_references.csv`, `refs/failed_references.txt` | checks/check_references.py | check result per image, with the sha1 of the checked file |
 | `refs_rejected/rejected.csv` | make_references.py | images replaced by `--retry`: scores, reason |
+| `cosmos/<run>/run_config.json` | run_cosmos.py | settings of the Cosmos job and the demos it takes |
+| `cosmos/<run>/<group>/<name>.json` | run_cosmos.py | framework settings of one video, and `policy_data`: source demo, reference image and its sha1, seed |
 | `dataset.csv`, `videos.csv` | status.py | state of every number and every video, made new on every run |
 
 States in `dataset.csv`: `conflict` (two images or videos for one number, or a file in the wrong folder: fix by
 hand), `needs_replace`, `needs_ref`, `needs_check` (no check result for the file that is there now), `ref_failed`,
-`needs_video`, `needs_review`, `video_rejected`, `approved`. The docstring of `status.py` explains each state.
+`needs_video`, `needs_review`, `video_rejected`, `approved`. The docstring of `status.py` explains each state. The
+column `note` says "replace running", "replace stopped halfway" or "cosmos running (<run>)" when a job works on the
+number.
 
 When all 750 videos are approved, the hdf5 files of the runs are not needed any more (the dataset has its own copy
 and the hard-linked videos stay).
@@ -195,8 +206,12 @@ Nothing in the code names a host, a user or an absolute path.
 - Before you install a package into the Isaac Sim environment, run `pip install --dry-run` and read the list.
   A normal install of openai changed typing_extensions and idna, which Isaac Sim pins; `setup.sh` uses `--no-deps`
   for this reason.
-- Cosmos3-Super fp8 needs 2 GPUs (`--gpus a,b --cp 2`); 3 GPUs did not work. A second Cosmos job at the same time
-  needs another `--port`.
+- Cosmos3-Super fp8 needs 2 GPUs (`--gpus a,b --cp 2`); 3 GPUs did not work. `run_cosmos.py` takes the first free
+  torchrun port from 29511, so two jobs on the same dataset need no `--port`. Jobs on other datasets or run folders
+  that start at the same moment need their own `--port`.
+- Stop a Cosmos job with Ctrl-C or `kill <pid>`: it stops the framework and keeps the finished videos. Run the same
+  command again for the rest. After `kill -9` the framework may go on for a while: `status.py` shows the job as
+  running until it ends; the next `run_cosmos.py` then takes over its finished videos.
 - h5py "unable to lock file": another process has the hdf5 open for writing (`make_dataset.py --replace`). Run the
   command again when it is done.
 - The same `--seed` does not give the same hdf5 file: the GPU physics differs slightly between runs.
@@ -216,8 +231,8 @@ Folder names are fixed by the scripts. Do not rename them or add words.
   `run_config.json`.
 - Dataset: `runs/<task>_n<demos>_seeds<seeds>_<YYYYMMDD>_<HHMM>/`, `<seeds>` = the seeds of its runs written one
   after the other (seeds 1, 2 and 3: `seeds123`). Replaced demos: `sim_rejected/<AAA>-<BBB>/demo_<NNN>_r<k>/`.
-- Cosmos run: `<run dir>/cosmos/<checkpoint name>_<YYYYMMDD>_<HHMM>/`. Prompt, seed and steps are in its
-  `run_config.json`.
+- Cosmos run: `<run dir>/cosmos/<checkpoint name>_<YYYYMMDD>_<HHMM>/` (`_2`, `_3`, ... when two jobs start in the
+  same minute). Prompt, seed, steps and demos are in its `run_config.json`.
 - Demo folders: `demos/<AAA>-<BBB>/demo_<NNN>/`, 50 demos per group folder (000-049, 050-099, ...).
 - Frame-0 images: `ref_sim/<AAA>-<BBB>/demo_<NNN>_ref_sim.png`.
 - Reference images: `refs/<AAA>-<BBB>/demo_<NNN>_<TT>.png`, NNN = demo index, TT = two-digit number (01, 02, ...).

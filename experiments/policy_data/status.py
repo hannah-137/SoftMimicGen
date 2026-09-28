@@ -7,7 +7,8 @@ It reads every list file of the dataset and the files on disk, and writes two fi
                 review, and the state (what the number needs next)
   videos.csv    one row per Cosmos video, current and rejected
 Then it prints the count per state, per group of 50, per place type, the problems and the next commands.
-make_references.py, checks/check_references.py and make_dataset.py call it at the end, so dataset.csv stays current.
+make_references.py, checks/check_references.py, make_dataset.py and run_cosmos.py call it at the end, so dataset.csv
+stays current.
 
 States, in the order they are handled:
   conflict        more than one reference image or video for the number, its image is in the wrong folder, or its
@@ -22,6 +23,8 @@ States, in the order they are handled:
   needs_review    the video has no review yet
   video_rejected  the video was rejected, attempts are left
   approved        the video was approved
+The column note says "replace running", "replace stopped halfway" or "cosmos running (<run>)" when a job works on
+the number; the next commands leave such numbers out.
 
 Every number keeps its place in the ratios (place type, strong light slot), because they come from the number, not
 from the image. A number is done only when its video is approved; nothing is dropped. The variation seed, the tag
@@ -31,9 +34,9 @@ It is safe to run at any time, also while other scripts run. Every script that w
 tracked file holds the dataset lock (<dataset>/.lists.lock, flock) for a short time; this script takes it too and
 waits while another script holds it. The lock needs a local file system (flock).
 
-This file also holds the helpers that the other scripts import: lock(), read_csv(), write_csv(), append_csv(),
-write_json(), parse_demos(), ranges(), current_sources(), dataset_config(), file_sha1(), check_is_current(),
-open_hdf5() and stop_signals().
+This file also holds the helpers that the other scripts import: lock(), lock_fd(), read_csv(), write_csv(),
+append_csv(), write_json(), parse_demos(), ranges(), current_sources(), dataset_config(), file_sha1(),
+check_is_current(), open_hdf5(), stop_signals(), running_cosmos() and cosmos_claims().
 """
 
 import argparse
@@ -61,7 +64,7 @@ VARIATION_SEED = 0  # seed of variations.py for the reference images of a datase
 LISTS_LOCK = ".lists.lock"  # short: held while a list file is written or a tracked file is moved
 REFS_LOCK = ".make_references.lock"  # long: held by make_references.py for the whole run
 REPLACE_LOCK = ".replace.lock"  # long: held by make_dataset.py --replace for the whole replace
-COSMOS_LOCK = ".run_cosmos.lock"  # long: for run_cosmos.py (it does not take it yet; make_dataset.py --replace does)
+RUNNING_LOCK = ".running.lock"  # in a Cosmos run folder: held by its run_cosmos.py until it ends
 H5_WAIT = 600  # seconds to wait while another process has an hdf5 file open
 
 SOURCE_COLUMNS = ["demo", "source_run", "source_demo", "seed", "camera_noise_pos_m", "camera_noise_rot_deg", "steps"]
@@ -124,6 +127,12 @@ def lock(folder: str, name: str = LISTS_LOCK):
                 entry[1] = None
     finally:
         entry[0].release()
+
+
+def lock_fd(folder: str, name: str) -> int | None:
+    """File descriptor of a lock this process holds (to hand it to a child process), or None."""
+    entry = _held.get(os.path.abspath(os.path.join(folder, name)))
+    return entry[1] if entry else None
 
 
 def read_csv(path: str) -> list:
@@ -298,6 +307,25 @@ def lock_holder(folder: str, name: str) -> str | None:
         os.close(fd)
 
 
+def running_cosmos(ds: str) -> dict:
+    """Cosmos run folder name -> its run_config.json, for every run_cosmos.py that runs now (.running.lock held)."""
+    out = {}
+    for cfg_path in sorted(glob.glob(f"{ds}/cosmos/*/run_config.json")):
+        folder = os.path.dirname(cfg_path)
+        if lock_holder(folder, RUNNING_LOCK) is None:
+            continue
+        try:
+            out[os.path.basename(folder)] = json.load(open(cfg_path))
+        except (OSError, ValueError):
+            continue
+    return out
+
+
+def cosmos_claims(ds: str) -> dict:
+    """demo number -> Cosmos run folder, for the demos of every run_cosmos.py that runs now."""
+    return {int(d): name for name, cfg in running_cosmos(ds).items() for d in cfg.get("demos", [])}
+
+
 def pending_replacements(ds: str) -> set:
     """Demo numbers with a --replace that is running or stopped halfway. Other scripts leave them alone."""
     return {int(j["demo"]) for _, j in open_replacements(ds) if "demo" in j}
@@ -441,6 +469,7 @@ def collect(ds: str) -> tuple[list, list, list]:
                             f"<dataset> --replace {j['demo']} to finish it, or add --cancel to drop it")
     for path in broken_replacements(ds):
         problems.append(f"{_rel(ds, path)}: unreadable or incomplete, fix by hand")
+    claims = cosmos_claims(ds)
 
     ref_rows = read_csv(f"{ds}/refs/references.csv")
     tries = collections.Counter((r["name"], r.get("source") or "") for r in ref_rows)
@@ -476,6 +505,8 @@ def collect(ds: str) -> tuple[list, list, list]:
             row.update(state="needs_replace", note=pending[idx])
             rows.append(row)
             continue
+        if idx in claims:
+            row["note"] = f"cosmos running ({claims[idx]})"
         missing = False
         for kind, path in (("geoedge video", f"{layout.demo_dir(ds, idx)}/{layout.demo_name(idx)}_geoedge.mp4"),
                            ("frame-0 image", f"{layout.ref_sim_dir(ds, idx)}/{layout.demo_name(idx)}_ref_sim.png")):
@@ -549,8 +580,11 @@ def _why_replace(row: dict, max_attempts: int) -> str:
     return f"the reference image failed {max_attempts} times"
 
 
-def next_commands(ds_arg: str, rows: list, max_attempts: int) -> list:
-    """The commands to run next, in the order the states are handled."""
+GPU_PAIRS = ["0,1", "2,3"]  # the example GPU pairs of the run_cosmos.py hint (a 4-GPU machine)
+
+
+def next_commands(ds_arg: str, rows: list, max_attempts: int, running: dict | None = None) -> list:
+    """The commands to run next, in the order the states are handled. running: the Cosmos jobs that run now."""
     s = os.path.relpath(HERE)
     by = collections.defaultdict(list)
     for r in rows:
@@ -574,11 +608,21 @@ def next_commands(ds_arg: str, rows: list, max_attempts: int) -> list:
         group = by["needs_ref"][0]["group"]
         cmds.append(f"python {s}/make_references.py {ds_arg} --demos "
                     f"{ranges(r['demo'] for r in by['needs_ref'] if r['group'] == group)}")
-    if by["needs_video"]:
-        group = by["needs_video"][0]["group"]
-        demos = " ".join(str(r["demo"]) for r in by["needs_video"] if r["group"] == group)
-        cmds.append(f"python {s}/run_cosmos.py {ds_arg} --demos {demos} "
-                    "--framework <dir> --checkpoint <dir> --hf_home <dir> --gpus 0,1 --cp 2")
+    ready = [r for r in by["needs_video"] if not r["note"]]
+    busy = {c.get("gpus") for c in (running or {}).values()}
+    free = [g for g in GPU_PAIRS if g not in busy]
+    if ready and not free:
+        cmds.append(f"{len(ready)} demos are ready for Cosmos; both GPU pairs are busy: wait for a running job")
+    elif ready:
+        group = ready[0]["group"]
+        demos = [r["demo"] for r in ready if r["group"] == group]
+        pairs = free[:2] if len(demos) > 1 else free[:1]
+        extra = f" --max {(len(demos) + 1) // 2}" if len(pairs) == 2 else ""
+        for gpus in pairs:
+            cmds.append(f"python {s}/run_cosmos.py {ds_arg} --demos {ranges(demos)}{extra} --gpus {gpus} "
+                        "--cp 2 --framework <dir> --checkpoint <dir> --hf_home <dir>")
+        if len(pairs) == 2:
+            cmds.append("  (the two run_cosmos.py commands can run at the same time: each takes other demos)")
     if rows and len(by["approved"]) == len(rows):
         cmds.append(f"done: all {len(rows)} demos approved")
     return cmds
@@ -614,13 +658,16 @@ def update(ds: str, ds_arg: str | None = None, quiet: bool = False) -> dict:
                                                    for t in [*variations.PLACES, "strong light"] if t in types))
     sims = collections.Counter(r["sim_review"] or "unreviewed" for r in rows)
     print("  simulator review: " + ", ".join(f"{k} {v}" for k, v in sorted(sims.items())))
+    running = running_cosmos(ds)
+    for name, c in running.items():
+        print(f"  cosmos running: {name} on GPUs {c.get('gpus', '?')}, demos {ranges(c.get('demos', []))}")
     if problems:
         print(f"  problems ({len(problems)}), fix by hand:")
         for p in problems[:20]:
             print(f"    {p}")
         if len(problems) > 20:
             print(f"    ... and {len(problems) - 20} more")
-    cmds = next_commands(ds_arg, rows, int(dataset_config(ds)["max_attempts"]))
+    cmds = next_commands(ds_arg, rows, int(dataset_config(ds)["max_attempts"]), running)
     if cmds:
         print("  next:")
         for c in cmds:
