@@ -38,7 +38,8 @@ This writes a new folder. Videos are 81 frames at 16 fps; `--all_frames` keeps e
       refs/000-049/   reference images demo_NNN_TT.png, in the folder of their demo; refs/references.csv (how
                 each image was made), refs/check_references.csv (+ failed_references.txt, and check_<name>.png
                 next to the image, only when something fails)
-      refs_rejected/   images replaced by make_references.py --retry
+      refs_rejected/000-049/   images replaced by make_references.py --retry (<name>_attempt<N>.png), and
+                refs_rejected/rejected.csv (their scores and the reason)
       cosmos/<checkpoint>_<date>_<time>/000-049/   per reference: <name>.mp4 (the video) and <name>.json (the
                 settings the framework used); run_config.json, run.log, debug.log, benchmark.json at the top
 
@@ -52,7 +53,8 @@ and the raw renderer data `*_depth_raw` (float32 m), `*_normals_raw` (float32), 
 T is the number of control steps (20 Hz for the Franka towel task).
 
 Real-looking videos with Cosmos3. First make one reference image per demo. It is a realistic version of `ref_sim`
-with the same layout, aspect 2:1. `make_references.py` makes it with the OpenAI image edit API (gpt-image-2). Every
+with the same layout, aspect 2:1. `make_references.py` makes it with the OpenAI image edit API
+(gpt-image-2.5-sunburst, quality medium). Every
 image changes 7 axes at once: place, table, lighting, robot wear, towel color, towel material and towel pattern.
 The lists and the rules are in `variations.py`. The place type comes first. It is exact in every group of 50 demos
 (000-049, ...): 10 outdoor (20%) and 4 of each of the 10 indoor types (8% each). An outdoor place gets outdoor
@@ -65,14 +67,146 @@ or `demo_NNN.png`. Then check them, then run:
     export OPENAI_API_KEY=...
     python experiments/policy_data/make_references.py <run_dir>            # --dry_run: prompts only, no API call
     python experiments/policy_data/checks/check_references.py <run_dir>
-    python experiments/policy_data/make_references.py <run_dir> --retry    # failed and missing images, new combination
+    python experiments/policy_data/make_references.py <run_dir> --retry    # failed images, new combination
     python experiments/policy_data/run_cosmos.py <run_dir> --framework <cosmos-framework> \
         --checkpoint <Cosmos3-Super-fp8> --hf_home <hf cache> --gpus 2,3 --cp 2
 
 The check rejects images that are not 2:1 and scores the layout (robot and towel where the simulator has them).
-When something fails, `failed_references.txt` lists the images to make again. `run_cosmos.py` only starts when
-every reference passed; it resizes the images to 1024 x 512 itself. Its output goes to
-`<run_dir>/cosmos/<checkpoint name>_<date>_<time>/000-049/`.
+When something fails, `failed_references.txt` lists the images to make again. `--retry` makes at most 3 images per
+demo (`--max_attempts`). Images that were never made (for example after an API error) are made by the same command
+without `--retry`. `run_cosmos.py` only starts when every reference passed; it resizes the images to 1024 x 512
+itself. Its output goes to `<run_dir>/cosmos/<checkpoint name>_<date>_<time>/000-049/`.
+
+## Make the dataset (750 demos)
+
+The spec is in `SPEC.md`. Run the commands from the repository root in the SoftMimicGen environment.
+`make_references.py`, `checks/check_references.py` and `status.py` can run again: finished work is skipped.
+`make_demos.sh`, `make_dataset.py --take`, `make_dataset.py --replace` and `run_cosmos.py` do the work again every
+time: run them once per step. (`--replace` without `--reason` only finishes a replace that `status.py` lists as
+stopped halfway.)
+`status.py` prints the state and the next commands.
+
+1. Simulator demos. Make more than needed: demos with the towel out of view are not used, and some demos get
+   replaced later. About 12 hours for 390 demos on one GPU, videos included.
+
+       bash experiments/policy_data/make_demos.sh franka_towel 100 --seed 1 --gpu 0
+       bash experiments/policy_data/make_demos.sh franka_towel 390 --seed 2 --gpu 1 \
+           --camera_noise_pos 0.05 --camera_noise_rot 5
+       bash experiments/policy_data/make_demos.sh franka_towel 390 --seed 3 --gpu 2 \
+           --camera_noise_pos 0.05 --camera_noise_rot 5
+
+2. Towel-in-view check, once per run:
+
+       python experiments/policy_data/checks/check_towel_in_view.py <run>/<name>.hdf5 \
+           --out <run>/check_towel_in_view.csv
+
+3. One dataset folder with the first demos of each run that pass the check (see "Dataset folder" below). The
+   hdf5 copy needs about 350 MB per demo (750 demos: about 260 GB); the script stops first when the disk has less.
+
+       python experiments/policy_data/make_dataset.py --take <seed 1 run>:50 <seed 2 run>:350 <seed 3 run>:350
+
+4. Look at the simulator videos (`demos/`). Put another demo at a number that looks wrong:
+
+       python experiments/policy_data/make_dataset.py <dataset> --replace <demo> --reason "<why>"
+
+   It takes the next unused demo of the same run. When a run has no spare left, make more demos with a new
+   `--seed` and the same other settings, run the check on them, and add `--from <that run>`. When a replace stops
+   halfway, `status.py` says so and prints the command that finishes it; the other scripts skip the number until
+   then.
+
+5. Reference images, in batches (one group of 50 is easy to follow; any size works, the ratios do not change).
+   About $0.014 per image; 50 images take about 10 minutes (3 calls in parallel). Check again after every retry.
+
+       export OPENAI_API_KEY=...
+       python experiments/policy_data/make_references.py <dataset> --demos 0-49
+       python experiments/policy_data/checks/check_references.py <dataset> --demos 0-49
+       python experiments/policy_data/make_references.py <dataset> --retry --demos 0-49
+
+6. Cosmos videos, about 12 minutes per video on 2 GPUs. Give exactly the numbers that `status.py` lists for the
+   next command (state `needs_video`). In this version `run_cosmos.py` takes single numbers (no ranges), does
+   not compare the image with its check result, and takes no lock: do not run `--replace` while it runs.
+
+       python experiments/policy_data/run_cosmos.py <dataset> --demos <numbers from status.py> \
+           --framework <cosmos-framework> --checkpoint <Cosmos3-Super-fp8> --hf_home <hf cache> --gpus 0,1 --cp 2
+
+7. Review every video, make rejected ones again, and replace demos that fail 3 times. The review page and the
+   remake of rejected videos are not in this version yet.
+
+8. The state at any time:
+
+       python experiments/policy_data/status.py <dataset>
+
+## Dataset folder
+
+`make_dataset.py --take` copies the demos into one hdf5 and numbers them 0, 1, 2, ... The videos and frame-0 images
+are hard links to the runs (no extra disk space). The runs stay as they are: `--replace` takes spare demos there.
+
+    runs/<task>_n<demos>_seeds<seeds>_<date>_<time>/
+      <task>_n<demos>_seeds<seeds>.hdf5   data/demo_N as in a run, plus the attributes source_run, source_demo and
+                                          instance_ids (the instance id table of its run; runs can number the ids
+                                          differently, so there is no _instance_ids.json in a dataset)
+      demos/, ref_sim/, refs/, refs_rejected/, cosmos/   as in a run folder
+      sim_rejected/000-049/demo_NNN_r<k>/  everything of a replaced demo (videos, frame-0 image, reference images,
+                                          Cosmos videos) and replaced.json
+      run_config.json                     the takes, every run (relative path and settings), and the fixed values
+                                          of the reference images: variation_seed, tag, max_attempts
+
+The list files. Each file has one writer. Every write happens under the dataset lock (`.lists.lock`, see
+`status.py`), so scripts can run at the same time.
+
+| File | Writer | Content |
+|---|---|---|
+| `sources.csv` | make_dataset.py | demo number -> source run and demo, seed, room camera noise, steps |
+| `replacements.csv` | make_dataset.py | one row per `--replace`: old and new source demo, reason, folder |
+| `refs/references.csv` | make_references.py | how each reference image was made (axes, prompt, source demo, cost) |
+| `refs/check_references.csv`, `refs/failed_references.txt` | checks/check_references.py | check result per image, with the sha1 of the checked file |
+| `refs_rejected/rejected.csv` | make_references.py | images replaced by `--retry`: scores, reason |
+| `dataset.csv`, `videos.csv` | status.py | state of every number and every video, made new on every run |
+
+States in `dataset.csv`: `conflict` (two images or videos for one number, or a file in the wrong folder: fix by
+hand), `needs_replace`, `needs_ref`, `needs_check` (no check result for the file that is there now), `ref_failed`,
+`needs_video`, `needs_review`, `video_rejected`, `approved`. The docstring of `status.py` explains each state.
+
+When all 750 videos are approved, the hdf5 files of the runs are not needed any more (the dataset has its own copy
+and the hard-linked videos stay).
+
+## Moving to another machine
+
+Nothing in the code names a host, a user or an absolute path.
+- Set up the environment with the setup scripts (SoftMimicGen README, `setup.sh`). Do not copy an environment.
+- Copy the dataset folder. It works alone: the hdf5, videos, images and lists are inside, and the lists use paths
+  relative to the folder. A copy of the dataset alone turns the hard links into normal files (about 20 MB per demo).
+- Copy the source runs too while demos can still be replaced. Put them next to the dataset, or give
+  `make_dataset.py --replace ... --runs_dir <folder>`.
+- Set `OPENAI_API_KEY`. For Cosmos: the framework with its `.venv`, the checkpoint and the Hugging Face cache.
+- Keep the dataset on a local disk: the locks use flock.
+
+## Troubleshooting
+
+- "waiting: another script holds ...lock": another script works on the same dataset. It goes on when that one is
+  done.
+- `make_dataset.py --take` stops with "differ in" or "different env_args": the runs were made with other settings
+  and cannot be in one dataset.
+- Isaac Sim stops at the first frame with "Vulkan device lost": use another GPU (`--gpu`). This happened on one GPU
+  of a 4-GPU machine; the other GPUs worked.
+- In a container, NVML errors or torch sees no GPU while the host is fine: restart the container.
+- `make_references.py` stops with "no credit left" (error type insufficient_quota, code credit_balance_exhausted):
+  add credit to the OpenAI account, then run the same command again.
+- Before you install a package into the Isaac Sim environment, run `pip install --dry-run` and read the list.
+  A normal install of openai changed typing_extensions and idna, which Isaac Sim pins; `setup.sh` uses `--no-deps`
+  for this reason.
+- Cosmos3-Super fp8 needs 2 GPUs (`--gpus a,b --cp 2`); 3 GPUs did not work. A second Cosmos job at the same time
+  needs another `--port`.
+- h5py "unable to lock file": another process has the hdf5 open for writing (`make_dataset.py --replace`). Run the
+  command again when it is done.
+- The same `--seed` does not give the same hdf5 file: the GPU physics differs slightly between runs.
+- `status.py` lists problems (for example a file in the wrong group folder): fix them by hand, then run it again.
+- "--replace stopped halfway": run `make_dataset.py <dataset> --replace <demo>` (no `--reason`). It finishes the
+  plan in `sim_rejected/<group>/demo_NNN_r<k>/replaced.json`. To drop the plan instead, add `--cancel` (possible
+  while the new demo is not linked yet; the old files move back). "replace running" in `dataset.csv` means a
+  `--replace` works on that number now: wait.
+- Do not run `make_videos.py` on a run again after `--take`: the dataset shares its video files (hard links), so
+  the dataset videos would change too.
 
 ## Names
 
@@ -80,6 +214,8 @@ Folder names are fixed by the scripts. Do not rename them or add words.
 
 - Demo run: `runs/<task>_n<demos>_seed<seed>_<YYYYMMDD>_<HHMM>/`. Other settings (cameras, raw data) are in its
   `run_config.json`.
+- Dataset: `runs/<task>_n<demos>_seeds<seeds>_<YYYYMMDD>_<HHMM>/`, `<seeds>` = the seeds of its runs written one
+  after the other (seeds 1, 2 and 3: `seeds123`). Replaced demos: `sim_rejected/<AAA>-<BBB>/demo_<NNN>_r<k>/`.
 - Cosmos run: `<run dir>/cosmos/<checkpoint name>_<YYYYMMDD>_<HHMM>/`. Prompt, seed and steps are in its
   `run_config.json`.
 - Demo folders: `demos/<AAA>-<BBB>/demo_<NNN>/`, 50 demos per group folder (000-049, 050-099, ...).
@@ -98,6 +234,9 @@ Folder names are fixed by the scripts. Do not rename them or add words.
 - `layout.py` - the folder rules (50 demos per folder).
 - `make_references.py`, `variations.py` - reference images with the OpenAI image API; the 7 axes, their lists and
   the rules.
+- `make_dataset.py` - one dataset folder from several runs (`--take`), another demo at a number (`--replace`).
+- `status.py` - state of a dataset (`dataset.csv`, `videos.csv`) and the next commands; the lock and csv helpers.
+- `SPEC.md` - the dataset spec: demos, ratios, reference images, Cosmos settings.
 - `checks/check_references.py` - size and layout check of the reference images.
 - `checks/check_towel_stuck.py` - finds demos where the towel still hangs on the gripper at the last frame.
 - `checks/check_towel_in_view.py` - finds demos where the towel touches the image border in any frame.
@@ -107,5 +246,6 @@ Folder names are fixed by the scripts. Do not rename them or add words.
 
 SoftMimicGen installed as in its README (Isaac Sim, Isaac Lab, annotated datasets). For videos: h5py, numpy,
 opencv-python, imageio, imageio-ffmpeg, ffmpeg. For reference images: the `openai` package
-(`bash experiments/policy_data/setup.sh`) and an OpenAI API key in `OPENAI_API_KEY` (paid, about $0.05 per image at
-quality medium). For Cosmos3: cosmos-framework with its `.venv` and a checkpoint.
+(`bash experiments/policy_data/setup.sh`) and an OpenAI API key in `OPENAI_API_KEY` (paid: about $0.014 per image
+with gpt-image-2.5-sunburst at quality medium; 50 images cost $0.70 on 2026-09-27). For Cosmos3: cosmos-framework
+with its `.venv` and a checkpoint.
