@@ -78,6 +78,7 @@ DATASET_COLUMNS = ["demo", "group", "source", "place_type", "strong_light", "sim
                    "ref_check", "room_score", "wrist_score", "refs_rejected", "video", "videos_rejected", "review",
                    "ref_problem", "review_text", "replaced", "state", "note"]
 VIDEO_COLUMNS = ["demo", "name", "cosmos_run", "file", "where", "source", "verdict", "review_text"]
+REVIEW_HISTORY_COLUMNS = ["kind", "video", "demo", "name", "source", "verdict", "ref_problem", "review", "reviewed_at"]
 STATES = ["conflict", "needs_replace", "needs_ref", "needs_check", "ref_failed", "needs_video", "needs_review",
           "video_rejected", "approved"]
 
@@ -366,6 +367,13 @@ def _rel(ds: str, path: str) -> str:
     return os.path.relpath(path, ds)
 
 
+def video_id(path: str) -> str:
+    """"<cosmos run>/<name>" of a video, the key of review.csv. It stays the same when the video moves from cosmos/
+    to cosmos_rejected/ (both keep <run>/<group>/<name>.mp4)."""
+    parts = os.path.normpath(path).split(os.sep)
+    return f"{parts[-3]}/{parts[-1][: -len('.mp4')]}"
+
+
 def _video_source(mp4: str) -> str | None:
     """Source demo in the video json (key policy_data.source), or None when the json does not have it."""
     try:
@@ -487,7 +495,7 @@ def collect(ds: str) -> tuple[list, list, list]:
         m = VIDEO_RE.fullmatch(os.path.basename(path))
         idx, src = int(m.group(1)), _video_source(path)
         rejected_by_demo[idx].append(src)
-        rev = reviews.get(_rel(ds, path), {})
+        rev = reviews.get(video_id(path), {})
         video_rows.append({"demo": idx, "name": os.path.basename(path)[: -len(".mp4")],
                            "cosmos_run": _rel(ds, path).split(os.sep)[1], "file": _rel(ds, path), "where": "rejected",
                            "source": src or "", "verdict": rev.get("verdict", ""),
@@ -522,7 +530,7 @@ def collect(ds: str) -> tuple[list, list, list]:
         n_redo = sum(1 for s in rejected_by_demo.get(idx, []) if s == src or (s is None and not replaced.get(idx)))
         row["videos_rejected"] = n_redo
         for path in vids:
-            rev = reviews.get(_rel(ds, path), {})
+            rev = reviews.get(video_id(path), {})
             video_rows.append({"demo": idx, "name": os.path.basename(path)[: -len(".mp4")],
                                "cosmos_run": _rel(ds, path).split(os.sep)[1], "file": _rel(ds, path),
                                "where": "current", "source": _video_source(path) or "",
@@ -547,7 +555,7 @@ def collect(ds: str) -> tuple[list, list, list]:
             else:
                 row["ref_check"] = "unchecked"
         if vids:
-            rev = reviews.get(row["video"], {})
+            rev = reviews.get(video_id(vids[0]), {})
             row["review"] = rev.get("verdict", "")
             row["ref_problem"], row["review_text"] = rev.get("ref_problem", ""), rev.get("review", "")
 
@@ -623,6 +631,12 @@ def next_commands(ds_arg: str, rows: list, max_attempts: int, running: dict | No
                         "--cp 2 --framework <dir> --checkpoint <dir> --hf_home <dir>")
         if len(pairs) == 2:
             cmds.append("  (the two run_cosmos.py commands can run at the same time: each takes other demos)")
+    if by["needs_review"]:
+        cmds.append(f"python {s}/review.py {ds_arg} --group {by['needs_review'][0]['group']}    "
+                    f"# {len(by['needs_review'])} videos to review")
+    if by["video_rejected"]:
+        cmds.append(f"{len(by['video_rejected'])} videos rejected: run_cosmos.py --redo_bad (makes them again) "
+                    "comes in the next version")
     if rows and len(by["approved"]) == len(rows):
         cmds.append(f"done: all {len(rows)} demos approved")
     return cmds

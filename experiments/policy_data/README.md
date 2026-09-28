@@ -107,8 +107,10 @@ work again every time: run them once per step. (`--replace` without `--reason` o
 
        python experiments/policy_data/make_dataset.py --take <seed 1 run>:50 <seed 2 run>:350 <seed 3 run>:350
 
-4. Look at the simulator videos (`demos/`). Put another demo at a number that looks wrong:
+4. Look at the simulator videos on the review page (see step 7), tab Simulator. After you reject a demo that looks
+   wrong, run `status.py`: it prints the command that puts another demo at its number:
 
+       python experiments/policy_data/review.py <dataset> --sim
        python experiments/policy_data/make_dataset.py <dataset> --replace <demo> --reason "<why>"
 
    It takes the next unused demo of the same run. When a run has no spare left, make more demos with a new
@@ -135,8 +137,17 @@ work again every time: run them once per step. (`--replace` without `--reason` o
 
    A demo that a running job makes a video for cannot be replaced until that job ends.
 
-7. Review every video, make rejected ones again, and replace demos that fail 3 times. The review page and the
-   remake of rejected videos are not in this version yet.
+7. Review the videos on the review page: the simulator video and the Cosmos video play together, next to the
+   reference image. Approve or reject each video, tick "reference image problem" when the image is the cause, and
+   write one line. Submit saves it; submit again to change it.
+
+       python experiments/policy_data/review.py <dataset> --group 000-049
+
+   The script prints the address with a secret token (kept in `<dataset>/.review_token`, so it stays the same when
+   the script starts again). From another machine, run the ssh command it prints on that machine, then open the
+   address. With VSCode Remote-SSH, run the ssh command in a VSCode terminal and forward the port in the Ports panel
+   (VSCode often does it by itself). Making rejected videos again (`run_cosmos.py --redo_bad`) comes in the next
+   version; a demo whose video fails 3 times gets replaced.
 
 8. The state at any time:
 
@@ -170,6 +181,9 @@ its own job.)
 | `refs_rejected/rejected.csv` | make_references.py | images replaced by `--retry`: scores, reason |
 | `cosmos/<run>/run_config.json` | run_cosmos.py | settings of the Cosmos job and the demos it takes |
 | `cosmos/<run>/<group>/<name>.json` | run_cosmos.py | framework settings of one video, and `policy_data`: source demo, reference image and its sha1, seed |
+| `review.csv` | review.py | the current verdict of each video (key: `<cosmos run>/<name>`), reference image problem, one line |
+| `sim_review.csv` | review.py | the verdict of each simulator demo (demo number and source demo) |
+| `review_history.csv` | review.py | every submitted verdict, with the time |
 | `dataset.csv`, `videos.csv` | status.py | state of every number and every video, made new on every run |
 
 States in `dataset.csv`: `conflict` (two images or videos for one number, or a file in the wrong folder: fix by
@@ -251,6 +265,7 @@ Folder names are fixed by the scripts. Do not rename them or add words.
   the rules.
 - `make_dataset.py` - one dataset folder from several runs (`--take`), another demo at a number (`--replace`).
 - `status.py` - state of a dataset (`dataset.csv`, `videos.csv`) and the next commands; the lock and csv helpers.
+- `review.py` - review page (web server, standard library only): approve or reject videos and simulator demos.
 - `SPEC.md` - the dataset spec: demos, ratios, reference images, Cosmos settings.
 - `checks/check_references.py` - size and layout check of the reference images.
 - `checks/check_towel_stuck.py` - finds demos where the towel still hangs on the gripper at the last frame.
