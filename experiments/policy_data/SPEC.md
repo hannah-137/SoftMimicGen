@@ -36,7 +36,7 @@ The steps and commands are in README.md. The lists of the reference image axes a
 | Model | gpt-image-2.5-sunburst, image edit (OpenAI API), quality medium |
 | Count | one per demo |
 | Place | first a place type, then a place inside it. Outdoor 20%, each of the 10 indoor types 8%, exact in every group of 50 demos |
-| Lighting | indoor lighting for an indoor place, outdoor lighting for an outdoor place |
+| Lighting | indoor lighting for an indoor place, outdoor lighting for an outdoor place; no light from the left, right or front (the image model draws it the same way in the room and the wrist view, which is wrong for the wrist camera) |
 | Strong colored light | 2 of every 50 images (4%), indoor only: red, green, blue or yellow light over the whole scene |
 | Other axes | every item has the same chance |
 | No repeat | no two images in the dataset share the same 7 values |
@@ -60,9 +60,9 @@ Axes (every image changes all 7 at once):
 |---|---|---|
 | Place | The scene is in {place}. | 180 (indoor 150 in 10 types, outdoor 30) |
 | Table | The table top is {table}. | 60 |
-| Lighting | The lighting is {lighting}. | indoor 96 (source 8 x color 4 x level 3), strong colored 4, outdoor 12 |
+| Lighting | The lighting is {lighting}. | indoor 72 (source 6 x color 4 x level 3), strong colored 4, outdoor 8 |
 | Robot | {robot} | 5 (surface wear of the white Franka) |
-| Towel color, material, pattern | The towel is {color} {material}, {pattern}. | 100, 8, 6 |
+| Towel color, material, pattern | The towel is {color} {material}, {pattern}. | 100, 8, 2 (plain or a subtle herringbone weave: stripes, checks, dots and borders faded to plain in the Cosmos videos when the towel folds) |
 
 ## Cosmos videos
 

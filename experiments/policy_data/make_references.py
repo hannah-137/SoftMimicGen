@@ -3,7 +3,7 @@
   export OPENAI_API_KEY=...
   python experiments/policy_data/make_references.py <run_dir> [--demos 0-49] [--seed 0]
       [--model gpt-image-2.5-sunburst] [--quality medium] [--size 2048x1024] [--tag 01] [--workers 3]
-      [--retry] [--max_attempts 3] [--dry_run] [--prompt_file <file>] [--refs <folder>]
+      [--retry] [--redo --reason "<why>"] [--max_attempts 3] [--dry_run] [--prompt_file <file>] [--refs <folder>]
 
 <run_dir> is a run folder (make_demos.sh) or a dataset folder (make_dataset.py).
 Input: <run_dir>/ref_sim/000-049/demo_NNN_ref_sim.png (frame 0, room | wrist, 1024x512, made by make_videos.py).
@@ -26,6 +26,10 @@ check row has the sha1 of the file on disk is made again; an image made after it
 first). It does not make images that were never made: run without --retry for those. The replaced image goes to
 <run_dir>/refs_rejected/000-049/<name>_attempt<N>.png, and refs_rejected/rejected.csv gets a row with its scores
 and the reason.
+--redo --demos ... --reason "<why>" makes the images of these demos again even when they passed the check (for
+example after a change of the variation lists), as a new attempt. The old image goes to refs_rejected/ with the
+reason. A demo that has a Cosmos video (or that a running run_cosmos.py works on) is not made again: reject its
+video on the review page with "reference image problem" instead, so the image and the video are made again together.
 --max_attempts (default 3): a demo gets at most this many images. In a dataset the count starts again when
 make_dataset.py --replace puts another demo at the number. When a demo reaches the limit, the script prints the
 make_dataset.py --replace command for it.
@@ -194,6 +198,8 @@ def main():
     ap.add_argument("--tag", default=None, help="reference number in the file name: demo_NNN_<tag>.png (default 01)")
     ap.add_argument("--workers", type=int, default=3, help="parallel API calls")
     ap.add_argument("--retry", action="store_true", help="make the images in refs/failed_references.txt again")
+    ap.add_argument("--redo", action="store_true", help="make the images of --demos again, also the passed ones")
+    ap.add_argument("--reason", default=None, help="with --redo: why (goes into refs_rejected/rejected.csv)")
     ap.add_argument("--max_attempts", type=int, default=None,
                     help=f"images per demo at most (default {status.MAX_ATTEMPTS}; in a dataset: its max_attempts)")
     ap.add_argument("--dry_run", action="store_true", help="print the prompt and the variations, call nothing")
@@ -202,6 +208,8 @@ def main():
     args = ap.parse_args()
     check_size(args.size)
     wanted = status.parse_demos(args.demos)
+    if args.redo and (args.retry or not wanted or not args.reason):
+        sys.exit('--redo needs --demos and --reason "<why>", and not --retry')
 
     run = os.path.abspath(args.run_dir)
     if not os.path.isdir(run):
@@ -268,6 +276,7 @@ def make(args, run: str, refs: str, rejected: str, prompt: str, wanted: list | N
     idxs = sorted(set(idxs))
 
     pending = status.pending_replacements(run) if sources else set()
+    claimed = status.cosmos_claims(run) if args.redo else {}
     jobs, gave_up, no_src = [], [], []
     for idx in idxs:
         name = f"{layout.demo_name(idx)}_{args.tag}"
@@ -281,7 +290,16 @@ def make(args, run: str, refs: str, rejected: str, prompt: str, wanted: list | N
             print(f"{name}: no frame-0 image ({os.path.relpath(src, run)}), skipped", flush=True)
             no_src.append(name)
             continue
-        if os.path.isfile(dst) and not args.retry:
+        if args.redo:
+            if not os.path.isfile(dst):
+                print(f"{name}: no image to make again (make it without --redo), skipped", flush=True)
+                continue
+            videos = glob.glob(f"{run}/cosmos/*/{layout.chunk(idx)}/{name}.mp4")
+            if videos or idx in claimed:
+                print(f"{name}: has a Cosmos video{' (being made)' if idx in claimed else ''}: reject it on the review "
+                      "page with 'reference image problem' instead, skipped", flush=True)
+                continue
+        elif os.path.isfile(dst) and not args.retry:
             print(f"{name}: exists, skipped", flush=True)
             continue
         if elsewhere.get(name):
@@ -375,8 +393,9 @@ def make(args, run: str, refs: str, rejected: str, prompt: str, wanted: list | N
                "cost_usd": round(cost, 4), "seconds": round(time.time() - t0, 1),
                "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
         with status.lock(lock_dir):
-            if os.path.isfile(dst):  # --retry: keep the replaced image outside refs/
-                reject(run, rejected, idx, name, dst, last.get(name), checks.get(name, {}))
+            if os.path.isfile(dst):  # --retry or --redo: keep the replaced image outside refs/
+                why = {**checks.get(name, {}), "reason": f"redo: {args.reason}"} if args.redo else checks.get(name, {})
+                reject(run, rejected, idx, name, dst, last.get(name), why)
             status.append_csv(csv_path, row, COLUMNS)
             os.replace(tmp, dst)
         with count_lock:

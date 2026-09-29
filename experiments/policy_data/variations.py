@@ -6,10 +6,12 @@ and towel pattern. All 7 axes change in every image. Generation rules:
   same groups as the demo folders (000-049, 050-099, ...): 10 outdoor (OUTDOOR_SHARE, 20%) and 4 of each of the 10
   indoor types (8% each). The 50 types of a group are shuffled over its demos. Places inside a type have the same
   chance.
-- lighting: indoor lighting for an indoor place, outdoor lighting for an outdoor place. In every group of BLOCK
+- lighting: indoor lighting for an indoor place, outdoor lighting for an outdoor place. No light comes from the left
+  or the right: the image model draws such a light the same way in both halves, which is wrong for the wrist camera
+  (it looks another way and moves). In every group of BLOCK
   demos, STRONG_PER_BLOCK (2, 4%) of the indoor demos get strong colored ambient light instead (red, green, blue or
   yellow, as in CRAFT).
-- other axes: every item has the same chance.
+- other axes: every item has the same chance. The towel pattern is plain or a subtle weave only (see TOWEL_PATTERNS).
 - no repeat: draw() never returns a combination whose key() is in `used`.
 A new attempt for the same image (make_references.py --retry) keeps the place type and the strong light slot and
 draws the rest again, so the shares stay exact. Each tag (01, 02, ...) has its own shuffle.
@@ -249,14 +251,12 @@ TABLES = [
 
 # Indoor lighting = source + color + level. Used as "The lighting is {source}, {color}, {level}."
 INDOOR_LIGHT_SOURCES = [
-    "daylight from a window on the left",
-    "daylight from a window on the right",
     "fluorescent ceiling panels",
     "warm ceiling lamps",
     "a warm spot light from above",
-    "studio softbox lights from the front",
-    "artificial side light from the left",
-    "artificial side light from the right",
+    "soft light panels over the whole room",
+    "diffuse daylight from a skylight above",
+    "LED strip lights on the ceiling",
 ]
 INDOOR_LIGHT_COLORS = [
     "with a neutral white tone",
@@ -274,12 +274,8 @@ INDOOR_LIGHT_LEVELS = [
 STRONG_LIGHT_COLORS = ["red", "green", "blue", "yellow"]
 # Outdoor lighting. Used as "The lighting is {light}."
 OUTDOOR_LIGHTS = [
-    "direct midday sun with hard shadows",
-    "morning sun from the left with long shadows",
-    "morning sun from the right with long shadows",
-    "warm evening sun from the left",
-    "warm evening sun from the right",
-    "golden hour light, low and warm",
+    "direct midday sun from high above, short hard shadows",
+    "bright sun behind thin clouds, soft shadows",
     "a bright overcast sky with soft even light",
     "a dark overcast sky before rain, dim",
     "open shade under a roof, soft light",
@@ -315,13 +311,11 @@ TOWEL_MATERIALS = [
     "terry cloth", "microfiber", "linen", "waffle-weave cotton", "fleece", "plain cotton", "bamboo fiber",
     "knit cotton",
 ]
+# Only patterns that stay the same while the towel is lifted and folded: Cosmos keeps the look of frame 0, but
+# stripes, checks, dots and a darker border faded to a plain towel on the folded part (test of 2026-09-28).
 TOWEL_PATTERNS = [
     "plain, one solid color",
-    "with a darker border along the edges",
-    "with thin stripes",
-    "with a small check pattern",
     "with a subtle herringbone weave",
-    "with small dots",
 ]
 
 FIELDS = ["place", "table", "lighting", "robot", "towel_color", "towel_material", "towel_pattern"]
