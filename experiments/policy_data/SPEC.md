@@ -22,7 +22,7 @@ The steps and commands are in README.md. The lists of the reference image axes a
 
 - One folder with demo numbers 000-749, in groups of 50 (000-049, 050-099, ...).
 - Each number has one reference image and one video. Nothing is dropped: a number is done when its video is
-  approved.
+  approved or marked weak (usable but weak; review.csv keeps the mark).
 - A number gets another simulator demo (`make_dataset.py --replace`) when the demo looks wrong in the simulator,
   its reference image failed 3 times, or its video was rejected 3 times. The number keeps its place type and its
   strong light slot, so the ratios below stay exact.
@@ -73,4 +73,4 @@ Axes (every image changes all 7 at once):
 | Reference | the reference image as frame 0 |
 | Output | 81 frames, 16 fps, 1024x512 |
 | Settings | 35 steps, guidance 3, control guidance 3, shift 5, seed 0 (a new seed when a video is made again) |
-| Review | a person approves or rejects every video; at most 3 videos per demo |
+| Review | a person marks every video approved, weak or rejected; weak and rejected need at least one reason; at most 3 videos per demo |

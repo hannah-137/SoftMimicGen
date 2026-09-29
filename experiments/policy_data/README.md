@@ -144,8 +144,15 @@ work again every time: run them once per step. (`--replace` without `--reason` o
    towel sentence of each reference image (color, material, pattern) to the prompt.
 
 7. Review the videos on the review page: the simulator video and the Cosmos video play together, next to the
-   reference image. Approve or reject each video, tick "reference image problem" when the image is the cause, and
-   write one line. Submit saves it; submit again to change it.
+   reference image. Mark each video Approve (O), Weak (a triangle: usable but weak) or Reject (X); the keys are A,
+   W and R. Weak counts as done, like Approve, and review.csv keeps the word weak for later analysis. With Weak or
+   Reject, tick one or more reasons (towel look, towel shape, doubled towel, extra object, robot, background,
+   lighting, image quality, room and wrist views do not match, reference image problem) or write the reason in the
+   line. A weak or rejected video without a reason is saved but counts as not reviewed until it has one. With
+   Reject, tick "reference image problem" when the image is the cause: the video is then made again with a new
+   image. The filter bar shows all videos, only O, only Weak, only X, or only the ones not reviewed. Submit saves
+   the marks (videos without a verdict are not saved); submit again to change them, and the page shows the saved
+   marks when it opens again.
 
        python experiments/policy_data/review.py <dataset> --group 000-049
 
@@ -187,19 +194,20 @@ its own job.)
 | `refs_rejected/rejected.csv` | make_references.py | images replaced by `--retry`: scores, reason |
 | `cosmos/<run>/run_config.json` | run_cosmos.py | settings of the Cosmos job and the demos it takes |
 | `cosmos/<run>/<group>/<name>.json` | run_cosmos.py | framework settings of one video, and `policy_data`: source demo, reference image and its sha1, seed |
-| `review.csv` | review.py | the current verdict of each video (key: `<cosmos run>/<name>`), reference image problem, one line |
+| `review.csv` | review.py | the current verdict of each video (key: `<cosmos run>/<name>`): `approved`, `weak` or `rejected`, reference image problem, reasons (ids joined with `;`, the list is `REASONS` in `status.py`), one line |
 | `sim_review.csv` | review.py | the verdict of each simulator demo (demo number and source demo) |
 | `review_history.csv` | review.py | every submitted verdict, with the time |
 | `dataset.csv`, `videos.csv` | status.py | state of every number and every video, made new on every run |
 
 States in `dataset.csv`: `conflict` (two images or videos for one number, or a file in the wrong folder: fix by
 hand), `needs_replace`, `needs_ref`, `needs_check` (no check result for the file that is there now), `ref_failed`,
-`needs_video`, `needs_review`, `video_rejected`, `approved`. The docstring of `status.py` explains each state. The
-column `note` says "replace running", "replace stopped halfway" or "cosmos running (<run>)" when a job works on the
-number.
+`needs_video`, `needs_review`, `video_rejected`, `approved`. `approved` includes the videos marked weak (with a
+reason); the column `review` still says weak. The docstring of `status.py` explains each state. The column `note`
+says "replace running", "replace stopped halfway" or "cosmos running (<run>)" when a job works on the number, and
+"no reason" for a video marked weak or rejected without a reason.
 
-When all 750 videos are approved, the hdf5 files of the runs are not needed any more (the dataset has its own copy
-and the hard-linked videos stay).
+When all 750 videos are approved (O or weak), the hdf5 files of the runs are not needed any more (the dataset has its
+own copy and the hard-linked videos stay).
 
 ## Moving to another machine
 
@@ -271,7 +279,8 @@ Folder names are fixed by the scripts. Do not rename them or add words.
   the rules.
 - `make_dataset.py` - one dataset folder from several runs (`--take`), another demo at a number (`--replace`).
 - `status.py` - state of a dataset (`dataset.csv`, `videos.csv`) and the next commands; the lock and csv helpers.
-- `review.py` - review page (web server, standard library only): approve or reject videos and simulator demos.
+- `review.py` - review page (web server, standard library only): mark videos O, weak or X with reasons, and check
+  the simulator demos.
 - `SPEC.md` - the dataset spec: demos, ratios, reference images, Cosmos settings.
 - `checks/check_references.py` - size and layout check of the reference images.
 - `checks/check_towel_stuck.py` - finds demos where the towel still hangs on the gripper at the last frame.

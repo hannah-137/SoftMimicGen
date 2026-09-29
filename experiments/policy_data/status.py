@@ -20,15 +20,16 @@ States, in the order they are handled:
   needs_check     the reference image has no check result (the check stores the sha1 of the file it checked)
   ref_failed      the reference image failed the check, attempts are left
   needs_video     no Cosmos video yet
-  needs_review    the video has no review yet
-  video_rejected  the video was rejected, attempts are left
-  approved        the video was approved
+  needs_review    the video has no review yet, or it is marked weak or rejected without a reason (note "no reason")
+  video_rejected  the video was rejected with a reason, attempts are left
+  approved        the video was approved, or marked weak (usable but weak) with a reason
 The column note says "replace running", "replace stopped halfway" or "cosmos running (<run>)" when a job works on
 the number; the next commands leave such numbers out.
 
 Every number keeps its place in the ratios (place type, strong light slot), because they come from the number, not
-from the image. A number is done only when its video is approved; nothing is dropped. The variation seed, the tag
-of the reference images and max_attempts are fixed per dataset in its run_config.json.
+from the image. A number is done only when its video is approved (or weak, with a reason); nothing is dropped. The
+column review keeps "weak", so weak videos can be counted and left out later. The variation seed, the tag of the
+reference images and max_attempts are fixed per dataset in its run_config.json.
 
 It is safe to run at any time, also while other scripts run. Every script that writes a list file or moves a
 tracked file holds the dataset lock (<dataset>/.lists.lock, flock) for a short time; this script takes it too and
@@ -36,7 +37,8 @@ waits while another script holds it. The lock needs a local file system (flock).
 
 This file also holds the helpers that the other scripts import: lock(), lock_fd(), read_csv(), write_csv(),
 append_csv(), write_json(), parse_demos(), ranges(), current_sources(), dataset_config(), file_sha1(),
-check_is_current(), open_hdf5(), stop_signals(), running_cosmos() and cosmos_claims().
+check_is_current(), open_hdf5(), stop_signals(), running_cosmos(), cosmos_claims(), reason_ids() and has_reason().
+The review rules are here too: VIDEO_VERDICTS, NEEDS_REASON and REASONS (the reason list of the review page).
 """
 
 import argparse
@@ -72,13 +74,31 @@ REPLACEMENT_COLUMNS = ["demo", "replacement", "old_source_run", "old_source_demo
                        "reason", "folder", "replaced_at"]
 REF_REJECTED_COLUMNS = ["demo", "name", "attempt", "source", "file", "room_score", "wrist_score", "reason",
                         "rejected_at"]
-REVIEW_COLUMNS = ["video", "demo", "name", "source", "verdict", "ref_problem", "review", "reviewed_at"]
+REVIEW_COLUMNS = ["video", "demo", "name", "source", "verdict", "ref_problem", "reasons", "review", "reviewed_at"]
 SIM_REVIEW_COLUMNS = ["demo", "source", "verdict", "review", "reviewed_at"]
 DATASET_COLUMNS = ["demo", "group", "source", "place_type", "strong_light", "sim_review", "reference", "ref_attempts",
                    "ref_check", "room_score", "wrist_score", "refs_rejected", "video", "videos_rejected", "review",
-                   "ref_problem", "review_text", "replaced", "state", "note"]
-VIDEO_COLUMNS = ["demo", "name", "cosmos_run", "file", "where", "source", "verdict", "review_text"]
-REVIEW_HISTORY_COLUMNS = ["kind", "video", "demo", "name", "source", "verdict", "ref_problem", "review", "reviewed_at"]
+                   "ref_problem", "reasons", "review_text", "replaced", "state", "note"]
+VIDEO_COLUMNS = ["demo", "name", "cosmos_run", "file", "where", "source", "verdict", "ref_problem", "reasons",
+                 "review_text"]
+REVIEW_HISTORY_COLUMNS = ["kind", "video", "demo", "name", "source", "verdict", "ref_problem", "reasons", "review",
+                          "reviewed_at"]
+VIDEO_VERDICTS = ["approved", "weak", "rejected"]  # review.csv; weak = usable but weak, it counts as done
+NEEDS_REASON = ("weak", "rejected")  # these verdicts count only with a reason (a reason id, the tick or a line)
+# Reasons for weak or rejected: (id in review.csv, text on the review page). "Reference image problem" is the column
+# ref_problem (a rejected video is then made again with a new reference image), and "other" is the line of text.
+REASONS = [
+    ("towel_look", "Towel color, texture or pattern changed"),
+    ("towel_shape", "Towel shape differs from the simulator"),
+    ("towel_doubled", "Towel looks doubled, or more than one towel"),
+    ("extra_object", "Extra object visible (hand, cable, gripper, text or logo, ...)"),
+    ("robot", "Robot problem (ghosting, doubling, melting, pose or motion differs from the simulator, ...)"),
+    ("background", "Background problem"),
+    ("lighting", "Lighting problem"),
+    ("image_quality", "Image quality problem (blur, smeared, overexposed)"),
+    ("views_differ", "Room and wrist views do not match"),
+]
+REASON_IDS = [r[0] for r in REASONS]
 STATES = ["conflict", "needs_replace", "needs_ref", "needs_check", "ref_failed", "needs_video", "needs_review",
           "video_rejected", "approved"]
 
@@ -374,6 +394,18 @@ def video_id(path: str) -> str:
     return f"{parts[-3]}/{parts[-1][: -len('.mp4')]}"
 
 
+def reason_ids(text: str) -> list:
+    """The known reason ids in the reasons column of review.csv ("a;b"), in the order of REASONS."""
+    ids = str(text or "").split(";")
+    return [x for x in REASON_IDS if x in ids]
+
+
+def has_reason(rev: dict) -> bool:
+    """True when a review.csv row gives a reason: a reason id, the reference image tick, or a line of text."""
+    return bool(reason_ids(rev.get("reasons")) or rev.get("ref_problem") == "1"
+                or str(rev.get("review") or "").strip())
+
+
 def _video_source(mp4: str) -> str | None:
     """Source demo in the video json (key policy_data.source), or None when the json does not have it."""
     try:
@@ -499,7 +531,8 @@ def collect(ds: str) -> tuple[list, list, list]:
         video_rows.append({"demo": idx, "name": os.path.basename(path)[: -len(".mp4")],
                            "cosmos_run": _rel(ds, path).split(os.sep)[1], "file": _rel(ds, path), "where": "rejected",
                            "source": src or "", "verdict": rev.get("verdict", ""),
-                           "review_text": rev.get("review", "")})
+                           "ref_problem": rev.get("ref_problem", ""),
+                           "reasons": ";".join(reason_ids(rev.get("reasons"))), "review_text": rev.get("review", "")})
 
     rows = []
     for idx in range(n):
@@ -534,7 +567,9 @@ def collect(ds: str) -> tuple[list, list, list]:
             video_rows.append({"demo": idx, "name": os.path.basename(path)[: -len(".mp4")],
                                "cosmos_run": _rel(ds, path).split(os.sep)[1], "file": _rel(ds, path),
                                "where": "current", "source": _video_source(path) or "",
-                               "verdict": rev.get("verdict", ""), "review_text": rev.get("review", "")})
+                               "verdict": rev.get("verdict", ""), "ref_problem": rev.get("ref_problem", ""),
+                               "reasons": ";".join(reason_ids(rev.get("reasons"))),
+                               "review_text": rev.get("review", "")})
 
         images = refs.get(idx, [])
         row["reference"] = " ".join(os.path.basename(p)[: -len(".png")] for p in images)
@@ -554,10 +589,12 @@ def collect(ds: str) -> tuple[list, list, list]:
                 row["room_score"], row["wrist_score"] = chk.get("room_score", ""), chk.get("wrist_score", "")
             else:
                 row["ref_check"] = "unchecked"
+        reason = False
         if vids:
             rev = reviews.get(video_id(vids[0]), {})
             row["review"] = rev.get("verdict", "")
             row["ref_problem"], row["review_text"] = rev.get("ref_problem", ""), rev.get("review", "")
+            row["reasons"], reason = ";".join(reason_ids(rev.get("reasons"))), has_reason(rev)
 
         if row["sim_review"] == "rejected":
             state = "needs_replace"
@@ -569,12 +606,14 @@ def collect(ds: str) -> tuple[list, list, list]:
             state = "needs_replace" if n_tries >= max_attempts else "ref_failed"
         elif not vids:
             state = "needs_video"
-        elif row["review"] == "approved":
-            state = "approved"
-        elif row["review"] == "rejected":
+        elif row["review"] == "approved" or (row["review"] == "weak" and reason):
+            state = "approved"  # weak counts as done; the column review still says weak
+        elif row["review"] == "rejected" and reason:
             state = "needs_replace" if n_redo + 1 >= max_attempts else "video_rejected"
         else:
             state = "needs_review"
+            if row["review"] in NEEDS_REASON:  # saved without a reason: not done, not made again
+                row["note"] = "; ".join(x for x in (row["note"], "no reason") if x)
         row["state"] = state
         rows.append(row)
     return rows, video_rows, problems
@@ -586,6 +625,11 @@ def _why_replace(row: dict, max_attempts: int) -> str:
     if row["review"] == "rejected":
         return f"the video was rejected {max_attempts} times"
     return f"the reference image failed {max_attempts} times"
+
+
+def _n(count: int, noun: str) -> str:
+    """'1 video', '2 videos'."""
+    return f"{count} {noun}{'' if count == 1 else 's'}"
 
 
 GPU_PAIRS = ["0,1", "2,3"]  # the example GPU pairs of the run_cosmos.py hint (a 4-GPU machine)
@@ -632,13 +676,16 @@ def next_commands(ds_arg: str, rows: list, max_attempts: int, running: dict | No
         if len(pairs) == 2:
             cmds.append("  (the two run_cosmos.py commands can run at the same time: each takes other demos)")
     if by["needs_review"]:
+        no_reason = sum(1 for r in by["needs_review"] if r["review"] in NEEDS_REASON)
         cmds.append(f"python {s}/review.py {ds_arg} --group {by['needs_review'][0]['group']}    "
-                    f"# {len(by['needs_review'])} videos to review")
+                    f"# {_n(len(by['needs_review']), 'video')} to review"
+                    + (f" ({no_reason} marked weak or rejected, without a reason)" if no_reason else ""))
     if by["video_rejected"]:
-        cmds.append(f"{len(by['video_rejected'])} videos rejected: run_cosmos.py --redo_bad (makes them again) "
-                    "comes in the next version")
+        cmds.append(f"{_n(len(by['video_rejected']), 'video')} rejected: run_cosmos.py --redo_bad (makes them "
+                    "again) comes in the next version")
     if rows and len(by["approved"]) == len(rows):
-        cmds.append(f"done: all {len(rows)} demos approved")
+        weak = sum(1 for r in rows if r["review"] == "weak")
+        cmds.append(f"done: all {len(rows)} demos approved" + (f" ({weak} of them weak)" if weak else ""))
     return cmds
 
 
@@ -655,9 +702,14 @@ def update(ds: str, ds_arg: str | None = None, quiet: bool = False) -> dict:
     if quiet:
         return counts
     ds_arg = ds_arg or os.path.relpath(ds)
-    print(f"\n== status of {ds_arg}: {len(rows)} demos, {counts.get('approved', 0)} approved "
-          f"({time.strftime('%Y-%m-%d %H:%M:%S')})")
+    weak = sum(1 for r in rows if r["state"] == "approved" and r["review"] == "weak")
+    print(f"\n== status of {ds_arg}: {len(rows)} demos, {counts.get('approved', 0)} approved"
+          + (f" ({weak} weak)" if weak else "") + f" ({time.strftime('%Y-%m-%d %H:%M:%S')})")
     print("  " + ", ".join(f"{s} {counts[s]}" for s in STATES if counts.get(s)))
+    no_reason = sum(1 for r in rows if r["state"] == "needs_review" and r["review"] in NEEDS_REASON)
+    if no_reason:
+        print(f"  no reason: {_n(no_reason, 'video')} marked weak or rejected without a reason. "
+              f"{'It counts' if no_reason == 1 else 'They count'} as needs_review. Add a reason on the review page.")
     groups = collections.defaultdict(collections.Counter)
     for r in rows:
         groups[r["group"]][r["state"] == "approved"] += 1
