@@ -135,7 +135,8 @@ work again every time: run them once per step. (`--replace` without `--reason` o
        python experiments/policy_data/run_cosmos.py <dataset> --demos 0-49 --max 25 --gpus 2,3 --cp 2 \
            --framework <cosmos-framework> --checkpoint <Cosmos3-Super-fp8> --hf_home <hf cache>
 
-   A demo that a running job makes a video for cannot be replaced until that job ends.
+   A demo that a running job makes a video for cannot be replaced until that job ends. `--towel_prompt` adds the
+   towel sentence of each reference image (color, material, pattern) to the prompt.
 
 7. Review the videos on the review page: the simulator video and the Cosmos video play together, next to the
    reference image. Approve or reject each video, tick "reference image problem" when the image is the cause, and

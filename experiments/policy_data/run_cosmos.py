@@ -33,6 +33,9 @@ the dataset takes over its finished videos, if the reference image and the demo 
 Settings are the ones of the earlier tests: resolution 480 tier (patched to 1024x512), 81 frames, 16 fps,
 35 steps, guidance 3, control guidance 3, shift 5, seed 0. The framework's default negative prompt is used.
 The prompt is short on purpose: the reference image gives the colors and materials. --prompt replaces it.
+--towel_prompt adds the towel sentence of the reference image to the prompt, after its first sentence (for example
+"The towel is pewter bamboo fiber, with thin stripes."), from refs/references.csv. It helps Cosmos keep the towel
+pattern while the towel moves (the reference image fixes only frame 0).
 The Cosmos3 checkpoint must fit on the given GPUs: Super fp8 needs 2 GPUs (48 GB) with --cp 2, Nano fp8 needs 1.
 The torchrun port is the first free one from 29511 that no running job of the same dataset has taken (--port sets
 it; give --port when jobs of other datasets or run folders start at the same moment).
@@ -80,6 +83,24 @@ def ref_video(png: str, mp4: str, frames: int, fps: int) -> None:
            "-c:v", "libx264", "-qp", "0", "-pix_fmt", "yuv444p", mp4]
     subprocess.run(cmd, check=True)
     os.remove(tmp)
+
+
+def towel_sentences(run_dir: str) -> dict:
+    """(reference name, source) -> "The towel is <color> <material>, <pattern>." of the image in refs/ now (the row
+    with the highest attempt; source is "" in a run folder)."""
+    best = {}
+    for r in status.read_csv(f"{run_dir}/refs/references.csv"):
+        k = (r["name"], r.get("source") or "")
+        if k not in best or int(r.get("attempt") or 0) >= int(best[k].get("attempt") or 0):
+            best[k] = r
+    return {k: f"The towel is {r['towel_color']} {r['towel_material']}, {r['towel_pattern']}." for k, r in best.items()
+            if r.get("towel_color")}
+
+
+def with_towel(prompt: str, towel: str) -> str:
+    """Put the towel sentence after the first sentence of the prompt."""
+    head, sep, tail = prompt.partition(". ")
+    return f"{head}. {towel} {tail}" if sep else f"{prompt} {towel}"
 
 
 def spec(name: str, control: str, ref: str, prompt: str, seed: int, steps: int) -> dict:
@@ -287,6 +308,8 @@ def main():
     ap.add_argument("--cp", type=int, default=1, help="context parallel size (2 for Super fp8 on 2 GPUs)")
     ap.add_argument("--port", type=int, default=None, help="torchrun master port (default: the first free from 29511)")
     ap.add_argument("--prompt", default=PROMPT)
+    ap.add_argument("--towel_prompt", action="store_true",
+                    help="add the towel sentence of each reference image to the prompt (see above)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps", type=int, default=35)
     ap.add_argument("--dry_run", action="store_true", help="write the specs and print the command, do not run")
@@ -325,24 +348,32 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, dataset: bool)
     config = json.load(open(f"{out}/run_config.json")) if os.path.isfile(f"{out}/run_config.json") else {}
     port = config.get("port") or args.port or free_port()
     config.update({"checkpoint": os.path.abspath(args.checkpoint), "demos": [i for i, _ in pairs],
-                   "references": [n for _, n in pairs], "prompt": args.prompt, "seed": args.seed,
+                   "references": [n for _, n in pairs], "prompt": args.prompt, "towel_prompt": args.towel_prompt,
+                   "seed": args.seed,
                    "steps": args.steps, "gpus": args.gpus, "cp": args.cp, "port": port,
                    "started": time.strftime("%Y-%m-%dT%H:%M:%S")})
     status.write_json(f"{out}/run_config.json", config)
     specs, meta = [], {}
+    towels = towel_sentences(run_dir) if args.towel_prompt else {}
     for idx, name in pairs:
         control = f"{layout.demo_dir(run_dir, idx)}/{layout.demo_name(idx)}_geoedge.mp4"
         ref = f"{layout.ref_dir(run_dir + '/refs', idx)}/{name}.png"
         for path in (control, ref):
             if not os.path.isfile(path):
                 sys.exit(f"missing: {path}")
+        prompt = args.prompt
+        if args.towel_prompt:
+            towel = towels.get((name, sources.get(name, "")))
+            if not towel:
+                sys.exit(f"{name}: no towel sentence in refs/references.csv (an image not made by make_references.py?)")
+            prompt = with_towel(args.prompt, towel)
         meta[name] = {"source": sources.get(name, ""), "reference": name, "reference_sha1": status.file_sha1(ref),
-                      "seed": args.seed, "cosmos_run": os.path.basename(out)}
+                      "seed": args.seed, "cosmos_run": os.path.basename(out), "prompt": prompt}
         ref_mp4 = f"{out}/refs/{name}.mp4"
         ref_video(ref, ref_mp4, frames=81, fps=16)
         path = f"{out}/specs/{name}.json"
         with open(path, "w") as f:
-            json.dump(spec(name, control, ref_mp4, args.prompt, args.seed, args.steps), f, indent=1)
+            json.dump(spec(name, control, ref_mp4, prompt, args.seed, args.steps), f, indent=1)
         specs.append(path)
     config["policy_data"] = meta  # lets a later job take over the videos if this one ends without moving them
     status.write_json(f"{out}/run_config.json", config)
