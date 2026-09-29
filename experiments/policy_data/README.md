@@ -143,6 +143,15 @@ work again every time: run them once per step. (`--replace` without `--reason` o
    A demo that a running job makes a video for cannot be replaced until that job ends. `--towel_prompt` adds the
    towel sentence of each reference image (color, material, pattern) to the prompt.
 
+   Steps 5 and 6 for many groups: `run_queue.py` does them group by group (images, check, retry, Cosmos). It makes
+   the images of the next group while Cosmos runs, so the GPUs do not wait between groups, and it waits for a
+   Cosmos job that already runs on the same GPUs. It does not wait for the review. Give the run_cosmos.py options
+   after `--`. Stop it after the running job with `touch <dataset>/.queue_stop`, or at once with Ctrl-C.
+
+       export OPENAI_API_KEY=...
+       python experiments/policy_data/run_queue.py <dataset> --demos 150-749 -- --gpus 2,3 --cp 2 --towel_prompt \
+           --framework <cosmos-framework> --checkpoint <Cosmos3-Super-fp8> --hf_home <hf cache> --tools <tools>
+
 7. Review the videos on the review page: the simulator video and the Cosmos video play together, next to the
    reference image. Mark each video Approve (O), Weak (a triangle: usable but weak) or Reject (X); the keys are A,
    W and R. Weak counts as done, like Approve, and review.csv keeps the word weak for later analysis. With Weak or
@@ -286,6 +295,7 @@ Folder names are fixed by the scripts. Do not rename them or add words.
 - `checks/check_towel_stuck.py` - finds demos where the towel still hangs on the gripper at the last frame.
 - `checks/check_towel_in_view.py` - finds demos where the towel touches the image border in any frame.
 - `run_cosmos.py`, `cosmos_launch.py` - Cosmos3 video2video with the edge control video.
+- `run_queue.py` - reference images and Cosmos videos group by group, with no wait on the GPUs between groups.
 
 ## Needs
 
