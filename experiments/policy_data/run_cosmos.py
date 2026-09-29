@@ -34,8 +34,9 @@ Settings are the ones of the earlier tests: resolution 480 tier (patched to 1024
 35 steps, guidance 3, control guidance 3, shift 5, seed 0. The framework's default negative prompt is used.
 The prompt is short on purpose: the reference image gives the colors and materials. --prompt replaces it.
 --towel_prompt adds the towel sentence of the reference image to the prompt, after its first sentence (for example
-"The towel is pewter bamboo fiber, with thin stripes."), from refs/references.csv. It helps Cosmos keep the towel
-pattern while the towel moves (the reference image fixes only frame 0).
+"The towel is pewter bamboo fiber, plain, one solid color."), from refs/references.csv. It helps Cosmos keep the
+towel pattern while the towel moves (the reference image fixes only frame 0). --towel_sentence changes that
+sentence: a text with {color}, {material} and {pattern}, which are filled from refs/references.csv.
 The Cosmos3 checkpoint must fit on the given GPUs: Super fp8 needs 2 GPUs (48 GB) with --cp 2, Nano fp8 needs 1.
 The torchrun port is the first free one from 29511 that no running job of the same dataset has taken (--port sets
 it; give --port when jobs of other datasets or run folders start at the same moment).
@@ -70,6 +71,7 @@ PROMPT = (
     "on both sides. The left camera is fixed and the right camera moves with the gripper. Split screen: left, the "
     "room camera; right, the camera on the robot gripper."
 )
+TOWEL_SENTENCE = "The towel is {color} {material}, {pattern}."  # --towel_prompt; --towel_sentence changes it
 
 
 def ref_video(png: str, mp4: str, frames: int, fps: int) -> None:
@@ -85,16 +87,16 @@ def ref_video(png: str, mp4: str, frames: int, fps: int) -> None:
     os.remove(tmp)
 
 
-def towel_sentences(run_dir: str) -> dict:
-    """(reference name, source) -> "The towel is <color> <material>, <pattern>." of the image in refs/ now (the row
-    with the highest attempt; source is "" in a run folder)."""
+def towel_sentences(run_dir: str, template: str = TOWEL_SENTENCE) -> dict:
+    """(reference name, source) -> the towel sentence of the image in refs/ now (the row with the highest attempt;
+    source is "" in a run folder). template has {color}, {material} and {pattern}."""
     best = {}
     for r in status.read_csv(f"{run_dir}/refs/references.csv"):
         k = (r["name"], r.get("source") or "")
         if k not in best or int(r.get("attempt") or 0) >= int(best[k].get("attempt") or 0):
             best[k] = r
-    return {k: f"The towel is {r['towel_color']} {r['towel_material']}, {r['towel_pattern']}." for k, r in best.items()
-            if r.get("towel_color")}
+    return {k: template.format(color=r["towel_color"], material=r["towel_material"], pattern=r["towel_pattern"])
+            for k, r in best.items() if r.get("towel_color")}
 
 
 def with_towel(prompt: str, towel: str) -> str:
@@ -310,6 +312,9 @@ def main():
     ap.add_argument("--prompt", default=PROMPT)
     ap.add_argument("--towel_prompt", action="store_true",
                     help="add the towel sentence of each reference image to the prompt (see above)")
+    ap.add_argument("--towel_sentence", default=TOWEL_SENTENCE,
+                    help=f'with --towel_prompt: the sentence, with {{color}}, {{material}} and {{pattern}} '
+                         f'(default "{TOWEL_SENTENCE}")')
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps", type=int, default=35)
     ap.add_argument("--dry_run", action="store_true", help="write the specs and print the command, do not run")
@@ -320,6 +325,10 @@ def main():
     if not os.path.isdir(run_dir):
         sys.exit(f"no such folder: {run_dir}")
     wanted = status.parse_demos(args.demos)
+    try:
+        args.towel_sentence.format(color="c", material="m", pattern="p")
+    except (KeyError, IndexError, ValueError) as e:
+        sys.exit(f"--towel_sentence: use only {{color}}, {{material}} and {{pattern}} ({e})")
     if args.max is not None and args.max < 1:
         sys.exit("--max must be 1 or more")
     dataset = status.is_dataset(run_dir)
@@ -349,12 +358,12 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, dataset: bool)
     port = config.get("port") or args.port or free_port()
     config.update({"checkpoint": os.path.abspath(args.checkpoint), "demos": [i for i, _ in pairs],
                    "references": [n for _, n in pairs], "prompt": args.prompt, "towel_prompt": args.towel_prompt,
-                   "seed": args.seed,
+                   "towel_sentence": args.towel_sentence if args.towel_prompt else "", "seed": args.seed,
                    "steps": args.steps, "gpus": args.gpus, "cp": args.cp, "port": port,
                    "started": time.strftime("%Y-%m-%dT%H:%M:%S")})
     status.write_json(f"{out}/run_config.json", config)
     specs, meta = [], {}
-    towels = towel_sentences(run_dir) if args.towel_prompt else {}
+    towels = towel_sentences(run_dir, args.towel_sentence) if args.towel_prompt else {}
     for idx, name in pairs:
         control = f"{layout.demo_dir(run_dir, idx)}/{layout.demo_name(idx)}_geoedge.mp4"
         ref = f"{layout.ref_dir(run_dir + '/refs', idx)}/{name}.png"

@@ -141,7 +141,8 @@ work again every time: run them once per step. (`--replace` without `--reason` o
            --framework <cosmos-framework> --checkpoint <Cosmos3-Super-fp8> --hf_home <hf cache>
 
    A demo that a running job makes a video for cannot be replaced until that job ends. `--towel_prompt` adds the
-   towel sentence of each reference image (color, material, pattern) to the prompt.
+   towel sentence of each reference image (color, material, pattern) to the prompt; `--towel_sentence` changes that
+   sentence (a text with `{color}`, `{material}` and `{pattern}`).
 
    Steps 5 and 6 for many groups: `run_queue.py` does them group by group (images, check, retry, Cosmos). It makes
    the images of the next group while Cosmos runs, so the GPUs do not wait between groups, and it waits for a
