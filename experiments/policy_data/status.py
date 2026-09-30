@@ -39,6 +39,7 @@ This file also holds the helpers that the other scripts import: lock(), lock_fd(
 append_csv(), write_json(), parse_demos(), ranges(), current_sources(), dataset_config(), file_sha1(),
 check_is_current(), open_hdf5(), stop_signals(), running_cosmos(), cosmos_claims(), reason_ids() and has_reason().
 The review rules are here too: VIDEO_VERDICTS, NEEDS_REASON and REASONS (the reason list of the review page).
+SPEC is the version of SPEC.md that the scripts follow now.
 """
 
 import argparse
@@ -60,6 +61,8 @@ import layout
 import variations
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+SPEC = "v2"  # version of SPEC.md that the scripts follow now (see its change history); written with every
+#              reference image (refs/references.csv) and every Cosmos job (run_config.json, video json)
 MAX_ATTEMPTS = 3  # reference images per demo, and videos per demo, before the demo is replaced
 TAG = "01"  # a dataset has one reference image per demo: demo_NNN_01.png
 VARIATION_SEED = 0  # seed of variations.py for the reference images of a dataset

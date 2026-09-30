@@ -22,10 +22,10 @@ failed image (--skip_check overrides). Without --demos it takes every image that
 
 Output: <run_dir>/cosmos/<checkpoint folder name>_<YYYYMMDD>_<HHMM>/ (with _2, _3, ... when that name exists) with,
 per reference, 000-049/<name>.mp4 (the video) and 000-049/<name>.json (the settings the framework used, plus
-policy_data: source demo, reference image name and sha1, seed), and run_config.json, run.log, debug.log and
-benchmark.json at the top. A video goes into its group folder only when it has all 81 frames. Temporary files
-(reference videos, specs, framework folders) are removed after a successful run; after a failure everything stays
-for a look.
+policy_data: source demo, reference image name and sha1, seed, spec version), and run_config.json, run.log,
+debug.log and benchmark.json at the top. A video goes into its group folder only when it has all 81 frames.
+Temporary files (reference videos, specs, framework folders) are removed after a successful run; after a failure
+everything stays for a look.
 Stop a job with Ctrl-C (or kill <pid>): the script stops the framework, keeps the finished videos and ends. The
 same command then makes the rest. When a job ended without that (for example kill -9), the next run_cosmos.py on
 the dataset takes over its finished videos, if the reference image and the demo are still the same.
@@ -359,7 +359,7 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, dataset: bool)
     config.update({"checkpoint": os.path.abspath(args.checkpoint), "demos": [i for i, _ in pairs],
                    "references": [n for _, n in pairs], "prompt": args.prompt, "towel_prompt": args.towel_prompt,
                    "towel_sentence": args.towel_sentence if args.towel_prompt else "", "seed": args.seed,
-                   "steps": args.steps, "gpus": args.gpus, "cp": args.cp, "port": port,
+                   "steps": args.steps, "gpus": args.gpus, "cp": args.cp, "port": port, "spec": status.SPEC,
                    "started": time.strftime("%Y-%m-%dT%H:%M:%S")})
     status.write_json(f"{out}/run_config.json", config)
     specs, meta = [], {}
@@ -377,7 +377,7 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, dataset: bool)
                 sys.exit(f"{name}: no towel sentence in refs/references.csv (an image not made by make_references.py?)")
             prompt = with_towel(args.prompt, towel)
         meta[name] = {"source": sources.get(name, ""), "reference": name, "reference_sha1": status.file_sha1(ref),
-                      "seed": args.seed, "cosmos_run": os.path.basename(out), "prompt": prompt}
+                      "seed": args.seed, "cosmos_run": os.path.basename(out), "prompt": prompt, "spec": status.SPEC}
         ref_mp4 = f"{out}/refs/{name}.mp4"
         ref_video(ref, ref_mp4, frames=81, fps=16)
         path = f"{out}/specs/{name}.json"

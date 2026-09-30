@@ -111,16 +111,23 @@ def items(ds: str, mode: str, group: str) -> dict:
     out = []
     if mode == "videos":
         reviews = {r["video"]: r for r in status.read_csv(f"{ds}/review.csv")}
+        specs = {}  # Cosmos run folder -> the spec version in its run_config.json
         for r in rows:
             if r["group"] != group or not r["video"] or " " in r["video"]:
                 continue  # no video yet, or a conflict (two videos): status.py lists it
             vid = status.video_id(r["video"])
             rev = reviews.get(vid, {})
             v = var.get((r["reference"], r["source"]), {})
+            run = os.path.dirname(os.path.dirname(f"{ds}/{r['video']}"))
+            if run not in specs:
+                try:
+                    specs[run] = json.load(open(f"{run}/run_config.json")).get("spec", "")
+                except (OSError, ValueError):
+                    specs[run] = ""
             out.append({
                 "key": vid, "demo": r["demo"], "name": r["reference"], "source": r["source"], "state": r["state"],
                 "note": r["note"], "place_type": r["place_type"], "strong_light": str(r["strong_light"]) == "1",
-                "video": vid, "variation": {f: v.get(f, "") for f in FIELDS},
+                "video": vid, "spec": specs[run], "variation": {f: v.get(f, "") for f in FIELDS},
                 "files": {"sim": f"demos/{r['group']}/{layout.demo_name(r['demo'])}/{layout.demo_name(r['demo'])}"
                                  "_source.mp4",
                           "cosmos": r["video"],
@@ -660,6 +667,7 @@ function headOf(it) {
   const h = el("div", { class: "head" }, el("span", { class: "name", text: it.name }),
     el("span", { class: "muted", text: `${it.place_type || ""}${it.strong_light ? " · strong light" : ""}` }),
     el("span", { class: "muted", text: `source ${it.source}` }),
+    it.spec ? el("span", { class: "muted", text: `spec ${it.spec}` }) : null,
     el("span", { class: "muted state" }));
   if (it.rejected_before) h.append(el("span", { class: "muted", text: `${it.rejected_before} rejected before` }));
   h.append(el("span", { class: "muted saved" }));

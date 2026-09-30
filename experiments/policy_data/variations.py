@@ -11,7 +11,9 @@ and towel pattern. All 7 axes change in every image. Generation rules:
   (it looks another way and moves). In every group of BLOCK
   demos, STRONG_PER_BLOCK (2, 4%) of the indoor demos get strong colored ambient light instead (red, green, blue or
   yellow, as in CRAFT).
-- other axes: every item has the same chance. The towel pattern is plain or a subtle weave only (see TOWEL_PATTERNS).
+- other axes: every item has the same chance. The towel pattern is plain or a subtle herringbone weave only (see
+  TOWEL_PATTERNS), and a pattern goes only with the materials it is really made in (PATTERN_MATERIALS): a
+  herringbone weave only on woven linen, cotton, bamboo fiber and flannel; every other material is plain.
 - no repeat: draw() never returns a combination whose key() is in `used`.
 A new attempt for the same image (make_references.py --retry) keeps the place type and the strong light slot and
 draws the rest again, so the shares stay exact. Each tag (01, 02, ...) has its own shuffle.
@@ -309,7 +311,7 @@ TOWEL_COLORS = [
 ]
 TOWEL_MATERIALS = [
     "terry cloth", "microfiber", "linen", "waffle-weave cotton", "fleece", "plain cotton", "bamboo fiber",
-    "knit cotton",
+    "knit cotton", "cotton flannel", "cotton poplin", "cotton muslin", "polyester", "cotton jersey", "rayon",
 ]
 # Only patterns that stay the same while the towel is lifted and folded: Cosmos keeps the look of frame 0, but
 # stripes, checks, dots and a darker border faded to a plain towel on the folded part (test of 2026-09-28).
@@ -317,6 +319,18 @@ TOWEL_PATTERNS = [
     "plain, one solid color",
     "with a subtle herringbone weave",
 ]
+# A pattern that is not in this table goes with every material. A herringbone weave is a way of weaving: terry
+# loops, knits, fleece, waffle grids and microfiber cannot have it. On such a mix the image model draws a texture
+# that is neither, and Cosmos changes it where the towel folds (review of 2026-09-29).
+PATTERN_MATERIALS = {
+    "with a subtle herringbone weave": ["linen", "plain cotton", "bamboo fiber", "cotton flannel"],
+}
+
+
+def towel_patterns(material: str) -> list:
+    """The patterns that go with a material."""
+    return [p for p in TOWEL_PATTERNS if p not in PATTERN_MATERIALS or material in PATTERN_MATERIALS[p]]
+
 
 FIELDS = ["place", "table", "lighting", "robot", "towel_color", "towel_material", "towel_pattern"]
 
@@ -376,8 +390,8 @@ def draw(demo: int, seed: int, used: set | None = None, attempt: int = 0, tag: s
             "robot": rng.choice(ROBOTS),
             "towel_color": rng.choice(TOWEL_COLORS),
             "towel_material": rng.choice(TOWEL_MATERIALS),
-            "towel_pattern": rng.choice(TOWEL_PATTERNS),
         }
+        v["towel_pattern"] = rng.choice(towel_patterns(v["towel_material"]))
         if used is None or key(v) not in used:
             return v
     raise RuntimeError("no unused combination found")

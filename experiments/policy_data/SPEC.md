@@ -74,3 +74,14 @@ Axes (every image changes all 7 at once):
 | Output | 81 frames, 16 fps, 1024x512 |
 | Settings | 35 steps, guidance 3, control guidance 3, shift 5, seed 0 (a new seed when a video is made again) |
 | Review | a person marks every video approved, weak or rejected; weak and rejected need at least one reason; at most 3 videos per demo |
+
+## Change history
+
+The scripts write the version of this spec (`SPEC` in `status.py`) with every reference image (column `spec` of
+`refs/references.csv`) and every Cosmos job (`run_config.json`, and `policy_data.spec` in the json of each video).
+The review page shows the version of each video.
+
+| Version | Date | Commit | Changes | Reference images | Cosmos videos |
+|---|---|---|---|---|---|
+| v1 | 2026-09-27 | 1910d53 | First spec. Lighting may come from the left, the right or the front. Towel patterns: plain, subtle herringbone, thin stripes, small checks, small dots, darker border. The Cosmos prompt has no towel sentence. | demos 0-49, first images: moved to `refs_rejected/`, except 11, 25, 35, 41 and 45, which follow the v2 rules and stay in use | demos 0-9, run `Cosmos3-Super-fp8_20260928_2118` (moved to `cosmos_archive/`) |
+| v2 | 2026-09-28 | 1ffe58d | No light from the left, the right or the front: the image model drew it the same way in both halves. Towel patterns: plain and subtle herringbone only: the prints faded to plain when the towel folded. The Cosmos prompt has the towel sentence of the reference image (`--towel_prompt`). | demos 0-149 | demos 0-9 (run `Cosmos3-Super-fp8_20260929_0100`), 10-49 (`..._20260929_0347`), 50-99 (`..._20260929_1413`) |

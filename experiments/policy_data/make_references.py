@@ -85,7 +85,7 @@ PROMPT = (
 # the bill is what OpenAI charges.
 PRICE = {"text": 5.0, "image_in": 8.0, "image_out": 30.0}
 COLUMNS = ["demo", "name", "attempt", "source", "seed", "model", "quality", "size", "place_type", *variations.FIELDS,
-           "prompt", "input_tokens", "output_tokens", "cost_usd", "seconds", "finished_at"]
+           "prompt", "input_tokens", "output_tokens", "cost_usd", "seconds", "finished_at", "spec"]
 RETRY_WAIT = [15, 30, 60, 120, 240]  # seconds between tries after a rate limit or a server error
 # Error codes of a 429 that means "no credit left" (the error type is insufficient_quota). No retry for these.
 NO_CREDIT_CODES = {"insufficient_quota", "credit_balance_exhausted"}
@@ -391,7 +391,7 @@ def make(args, run: str, refs: str, rejected: str, prompt: str, wanted: list | N
                "quality": args.quality, "size": args.size, **v, "prompt": text,
                "input_tokens": getattr(usage, "input_tokens", ""), "output_tokens": getattr(usage, "output_tokens", ""),
                "cost_usd": round(cost, 4), "seconds": round(time.time() - t0, 1),
-               "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+               "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "spec": status.SPEC}
         with status.lock(lock_dir):
             if os.path.isfile(dst):  # --retry or --redo: keep the replaced image outside refs/
                 why = {**checks.get(name, {}), "reason": f"redo: {args.reason}"} if args.redo else checks.get(name, {})

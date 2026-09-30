@@ -1,6 +1,6 @@
 """Make the reference images and the Cosmos videos of a dataset group by group, so the GPUs do not wait.
 
-  python experiments/policy_data/run_queue.py <dataset_dir> [--demos 150-749] -- <run_cosmos.py options>
+  python experiments/policy_data/run_queue.py <dataset_dir> [--demos 150-749] [--count 100] -- <run_cosmos.py options>
 
   for example:
   export OPENAI_API_KEY=...
@@ -26,6 +26,8 @@ the next group when this group got at least one video, and stops when it got non
 fails: fix the cause and start the queue again). A new start goes on where the last one stopped, because every
 step skips what is done.
 
+--count N takes only the first N demos (in --demos) that still need a video, for example --count 100 for the
+next two groups; then the queue stops. Start it again with a new --count to go on.
 Stop: create the file <dataset>/.queue_stop to stop after the Cosmos job that runs now (the queue removes the file),
 or press Ctrl-C or send SIGTERM to stop now: run_cosmos.py keeps the videos that are done.
 Needs OPENAI_API_KEY when a group still needs reference images. All output goes to this script's output: send it
@@ -163,6 +165,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("dataset_dir", help="dataset folder made by make_dataset.py --take")
     ap.add_argument("--demos", nargs="+", default=None, help="demo numbers and ranges, e.g. 150-749 (default: all)")
+    ap.add_argument("--count", type=int, default=None,
+                    help="take only the first N demos that still need a video (in --demos), then stop")
     args = ap.parse_args(argv[: argv.index("--")] if "--" in argv else argv)
     ds = os.path.abspath(args.dataset_dir)
     if not status.is_dataset(ds):
@@ -179,10 +183,13 @@ def main():
     gpus = gpus_of(cosmos_args)
 
     wanted = states(ds, status.parse_demos(args.demos) or range(len(status.current_sources(ds))))
+    if args.count is not None and args.count < 1:
+        sys.exit("--count must be 1 or more")
+    todo = [d for d, s in sorted(wanted.items()) if s in TO_MAKE][: args.count]
+    wanted = {d: s for d, s in wanted.items() if d in todo}
     groups = {}
-    for d, s in sorted(wanted.items()):
-        if s in TO_MAKE:
-            groups.setdefault(layout.chunk(d), []).append(d)
+    for d in todo:
+        groups.setdefault(layout.chunk(d), []).append(d)
     if not groups:
         log("nothing to make")
         status.update(ds)

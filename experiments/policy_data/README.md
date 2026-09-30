@@ -147,7 +147,8 @@ work again every time: run them once per step. (`--replace` without `--reason` o
    Steps 5 and 6 for many groups: `run_queue.py` does them group by group (images, check, retry, Cosmos). It makes
    the images of the next group while Cosmos runs, so the GPUs do not wait between groups, and it waits for a
    Cosmos job that already runs on the same GPUs. It does not wait for the review. Give the run_cosmos.py options
-   after `--`. Stop it after the running job with `touch <dataset>/.queue_stop`, or at once with Ctrl-C.
+   after `--`. `--count N` makes only the next N demos that still need a video (for example 100 = two groups),
+   then stops. Stop it after the running job with `touch <dataset>/.queue_stop`, or at once with Ctrl-C.
 
        export OPENAI_API_KEY=...
        python experiments/policy_data/run_queue.py <dataset> --demos 150-749 -- --gpus 2,3 --cp 2 --towel_prompt \
