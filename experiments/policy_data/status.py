@@ -3,10 +3,11 @@
   python experiments/policy_data/status.py <dataset_dir>
 
 It reads every list file of the dataset and the files on disk, and writes two files, both made new on every run:
-  dataset.csv   one row per demo number: source demo, place type, reference image and its check, video and its
-                review, and the state (what the number needs next)
-  videos.csv    one row per Cosmos video, current and rejected
-Then it prints the count per state, per group of 50, per place type, the problems and the next commands.
+  dataset.csv   one row per demo number: source demo, place type, reference image, its spec version and its check,
+                video and its review, and the state (what the number needs next)
+  videos.csv    one row per Cosmos video, current and rejected, with the spec version it was made with
+Then it prints the count per state, per group of 50, per place type, per spec version, the problems and the next
+commands.
 make_references.py, checks/check_references.py, make_dataset.py and run_cosmos.py call it at the end, so dataset.csv
 stays current.
 
@@ -39,7 +40,8 @@ This file also holds the helpers that the other scripts import: lock(), lock_fd(
 append_csv(), write_json(), parse_demos(), ranges(), current_sources(), dataset_config(), file_sha1(),
 check_is_current(), open_hdf5(), stop_signals(), running_cosmos(), cosmos_claims(), reason_ids() and has_reason().
 The review rules are here too: VIDEO_VERDICTS, NEEDS_REASON and REASONS (the reason list of the review page).
-SPEC is the version of SPEC.md that the scripts follow now.
+SPEC is the spec version (specs/<version>.json) of new reference images when --spec is not given; row_spec() gives
+the version of a row of refs/references.csv.
 """
 
 import argparse
@@ -61,8 +63,8 @@ import layout
 import variations
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SPEC = "v2"  # version of SPEC.md that the scripts follow now (see its change history); written with every
-#              reference image (refs/references.csv) and every Cosmos job (run_config.json, video json)
+SPEC = "v2"  # spec version (specs/<version>.json) of new reference images when --spec is not given
+UNRECORDED_SPEC = "v2"  # images made before refs/references.csv had the column spec (2026-09-29) follow v2
 MAX_ATTEMPTS = 3  # reference images per demo, and videos per demo, before the demo is replaced
 TAG = "01"  # a dataset has one reference image per demo: demo_NNN_01.png
 VARIATION_SEED = 0  # seed of variations.py for the reference images of a dataset
@@ -79,11 +81,11 @@ REF_REJECTED_COLUMNS = ["demo", "name", "attempt", "source", "file", "room_score
                         "rejected_at"]
 REVIEW_COLUMNS = ["video", "demo", "name", "source", "verdict", "ref_problem", "reasons", "review", "reviewed_at"]
 SIM_REVIEW_COLUMNS = ["demo", "source", "verdict", "review", "reviewed_at"]
-DATASET_COLUMNS = ["demo", "group", "source", "place_type", "strong_light", "sim_review", "reference", "ref_attempts",
-                   "ref_check", "room_score", "wrist_score", "refs_rejected", "video", "videos_rejected", "review",
-                   "ref_problem", "reasons", "review_text", "replaced", "state", "note"]
-VIDEO_COLUMNS = ["demo", "name", "cosmos_run", "file", "where", "source", "verdict", "ref_problem", "reasons",
-                 "review_text"]
+DATASET_COLUMNS = ["demo", "group", "source", "place_type", "strong_light", "sim_review", "reference", "spec",
+                   "ref_attempts", "ref_check", "room_score", "wrist_score", "refs_rejected", "video",
+                   "videos_rejected", "review", "ref_problem", "reasons", "review_text", "replaced", "state", "note"]
+VIDEO_COLUMNS = ["demo", "name", "cosmos_run", "file", "where", "source", "spec", "verdict", "ref_problem",
+                 "reasons", "review_text"]
 REVIEW_HISTORY_COLUMNS = ["kind", "video", "demo", "name", "source", "verdict", "ref_problem", "reasons", "review",
                           "reviewed_at"]
 VIDEO_VERDICTS = ["approved", "weak", "rejected"]  # review.csv; weak = usable but weak, it counts as done
@@ -409,13 +411,40 @@ def has_reason(rev: dict) -> bool:
                 or str(rev.get("review") or "").strip())
 
 
-def _video_source(mp4: str) -> str | None:
-    """Source demo in the video json (key policy_data.source), or None when the json does not have it."""
+def row_spec(row: dict) -> str:
+    """The spec version of a row of refs/references.csv."""
+    return row.get("spec") or UNRECORDED_SPEC
+
+
+def latest_refs(rows: list) -> dict:
+    """(name, source) -> the row of refs/references.csv with the highest attempt: the image that is in refs/ now
+    (source is "" in a run folder)."""
+    out = {}
+    for r in rows:
+        k = (r["name"], r.get("source") or "")
+        if k not in out or int(r.get("attempt") or 0) >= int(out[k].get("attempt") or 0):
+            out[k] = r
+    return out
+
+
+def _video_meta(mp4: str) -> dict:
+    """The key policy_data of the video json (source demo, spec, ...), {} when the json does not have it."""
     try:
         with open(mp4[: -len(".mp4")] + ".json") as f:
-            return json.load(f).get("policy_data", {}).get("source")
+            meta = json.load(f).get("policy_data", {})
+        return meta if isinstance(meta, dict) else {}
     except (OSError, ValueError, AttributeError):
-        return None
+        return {}
+
+
+def _run_spec(ds: str, run: str, cache: dict) -> str:
+    """The spec of a Cosmos run folder (key spec of its run_config.json), for videos whose json has none."""
+    if run not in cache:
+        try:
+            cache[run] = str(json.load(open(f"{ds}/{run}/run_config.json")).get("spec") or "")
+        except (OSError, ValueError, AttributeError):
+            cache[run] = ""
+    return cache[run]
 
 
 def _scan_refs(ds: str, n: int, problems: list) -> tuple[dict, set]:
@@ -516,6 +545,7 @@ def collect(ds: str) -> tuple[list, list, list]:
 
     ref_rows = read_csv(f"{ds}/refs/references.csv")
     tries = collections.Counter((r["name"], r.get("source") or "") for r in ref_rows)
+    latest = latest_refs(ref_rows)
     check_rows = {r["name"]: r for r in read_csv(f"{ds}/refs/check_references.csv")}
     ref_rejected = collections.Counter(r["name"] for r in read_csv(f"{ds}/refs_rejected/rejected.csv"))
     reviews = {r["video"]: r for r in read_csv(f"{ds}/review.csv")}
@@ -525,15 +555,20 @@ def collect(ds: str) -> tuple[list, list, list]:
     refs, stray_refs = _scan_refs(ds, n, problems)
     videos, rejected_videos, stray_videos = _scan_videos(ds, n, problems)
     rejected_by_demo = collections.defaultdict(list)
-    video_rows = []
+    video_rows, run_specs = [], {}
+
+    def video_spec(path: str, meta: dict) -> str:
+        return meta.get("spec") or _run_spec(ds, os.path.dirname(os.path.dirname(_rel(ds, path))), run_specs)
+
     for path in rejected_videos:
         m = VIDEO_RE.fullmatch(os.path.basename(path))
-        idx, src = int(m.group(1)), _video_source(path)
+        meta = _video_meta(path)
+        idx, src = int(m.group(1)), meta.get("source")
         rejected_by_demo[idx].append(src)
         rev = reviews.get(video_id(path), {})
         video_rows.append({"demo": idx, "name": os.path.basename(path)[: -len(".mp4")],
                            "cosmos_run": _rel(ds, path).split(os.sep)[1], "file": _rel(ds, path), "where": "rejected",
-                           "source": src or "", "verdict": rev.get("verdict", ""),
+                           "source": src or "", "spec": video_spec(path, meta), "verdict": rev.get("verdict", ""),
                            "ref_problem": rev.get("ref_problem", ""),
                            "reasons": ";".join(reason_ids(rev.get("reasons"))), "review_text": rev.get("review", "")})
 
@@ -566,16 +601,18 @@ def collect(ds: str) -> tuple[list, list, list]:
         n_redo = sum(1 for s in rejected_by_demo.get(idx, []) if s == src or (s is None and not replaced.get(idx)))
         row["videos_rejected"] = n_redo
         for path in vids:
-            rev = reviews.get(video_id(path), {})
+            rev, meta = reviews.get(video_id(path), {}), _video_meta(path)
             video_rows.append({"demo": idx, "name": os.path.basename(path)[: -len(".mp4")],
                                "cosmos_run": _rel(ds, path).split(os.sep)[1], "file": _rel(ds, path),
-                               "where": "current", "source": _video_source(path) or "",
+                               "where": "current", "source": meta.get("source") or "", "spec": video_spec(path, meta),
                                "verdict": rev.get("verdict", ""), "ref_problem": rev.get("ref_problem", ""),
                                "reasons": ";".join(reason_ids(rev.get("reasons"))),
                                "review_text": rev.get("review", "")})
 
         images = refs.get(idx, [])
         row["reference"] = " ".join(os.path.basename(p)[: -len(".png")] for p in images)
+        made = latest.get((row["reference"], src)) if len(images) == 1 else None
+        row["spec"] = row_spec(made) if made else ""  # "" for an image that make_references.py did not make
         row["video"] = " ".join(_rel(ds, p) for p in vids)
         if len(images) > 1 or len(vids) > 1 or idx in stray_refs or idx in stray_videos or missing:
             if len(images) > 1 or len(vids) > 1:
@@ -724,7 +761,14 @@ def update(ds: str, ds_arg: str | None = None, quiet: bool = False) -> dict:
         if str(r["strong_light"]) == "1":
             types["strong light"][r["state"] == "approved"] += 1
     print("  approved per place type: " + ", ".join(f"{t} {types[t][True]}/{sum(types[t].values())}"
-                                                   for t in [*variations.PLACES, "strong light"] if t in types))
+                                                   for t in [*variations.PLACE_TYPES, "strong light"] if t in types))
+    specs = collections.defaultdict(collections.Counter)
+    for r in rows:
+        if r["spec"]:
+            specs[r["spec"]][r["state"] == "approved"] += 1
+    if specs:
+        print("  approved per spec (of the demos with a reference image): "
+              + ", ".join(f"{v} {specs[v][True]}/{sum(specs[v].values())}" for v in sorted(specs)))
     sims = collections.Counter(r["sim_review"] or "unreviewed" for r in rows)
     print("  simulator review: " + ", ".join(f"{k} {v}" for k, v in sorted(sims.items())))
     running = running_cosmos(ds)

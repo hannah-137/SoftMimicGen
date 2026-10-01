@@ -55,14 +55,17 @@ T is the number of control steps (20 Hz for the Franka towel task).
 
 Real-looking videos with Cosmos3. First make one reference image per demo. It is a realistic version of `ref_sim`
 with the same layout, aspect 2:1. `make_references.py` makes it with the OpenAI image edit API
-(gpt-image-2.5-sunburst, quality medium). Every
-image changes 7 axes at once: place, table, lighting, robot wear, towel color, towel material and towel pattern.
-The lists and the rules are in `variations.py`. The place type comes first. It is exact in every group of 50 demos
-(000-049, ...): 10 outdoor (20%) and 4 of each of the 10 indoor types (8% each). An outdoor place gets outdoor
-lighting. No light comes from the left or the right: the image model would draw it the same way in both views.
-2 of every 50 images get strong red, green, blue or yellow light (indoor only, as in CRAFT). No two
-images in a run share a combination. `refs/references.csv` records the axes, the prompt, the tokens and the cost of
-every image. You can also put your own images in
+(v2: gpt-image-2.5-sunburst, quality medium). The lists, the prompts, the image model and the Cosmos prompt of each
+spec version are in one file, `specs/<version>.json` (see `SPEC.md`, change history); `--spec v3` picks another
+version, and the default is v2. In v2 every image changes 7 axes at once: place, table, lighting, robot wear, towel
+color, towel material and towel pattern. The rules are in `variations.py` and are the same for every version. The
+place type comes first. It is exact in every group of 50 demos (000-049, ...): 10 outdoor (20%) and 4 of each of the
+10 indoor types (8% each). An outdoor place gets outdoor lighting. No light comes from the left or the right: the
+image model would draw it the same way in both views. 2 of every 50 images get strong red, green, blue or yellow
+light (indoor only, as in CRAFT). No two images in a run share a combination. `refs/references.csv` records the
+axes, the prompt, the tokens, the cost and the spec version of every image. For a test of other lists or prompts,
+copy a spec file, give it a new version name and pass its path: `--spec <file.json>` (in a dataset folder only with
+`--refs <other folder>`). You can also put your own images in
 `<run_dir>/refs/000-049/` (the folder of the demo) as `demo_NNN_<tag>.png` (several per demo, one video per image)
 or `demo_NNN.png`. Then check them, then run:
 
@@ -127,9 +130,10 @@ work again every time: run them once per step. (`--replace` without `--reason` o
        python experiments/policy_data/checks/check_references.py <dataset> --demos 0-49
        python experiments/policy_data/make_references.py <dataset> --retry --demos 0-49
 
-   To make passed images again (for example after a change of the lists in `variations.py`), use
-   `--redo --demos <numbers> --reason "<why>"`. It skips demos that have a Cosmos video: reject those videos on the
-   review page with "reference image problem".
+   `--spec v3` makes the images with spec version v3 (`specs/v3.json`); the default is v2. `--retry` without
+   `--spec` keeps the version of each image. To make passed images again (for example with a new spec version),
+   use `--redo --demos <numbers> --reason "<why>"`. It skips demos that have a Cosmos video: reject those videos on
+   the review page with "reference image problem".
 
 6. Cosmos videos, about 12 minutes per video on 2 GPUs. The script takes only the demos that are ready (state
    `needs_video`: the image passed its check, no video yet) and skips the rest, so the same command can run again.
@@ -140,18 +144,21 @@ work again every time: run them once per step. (`--replace` without `--reason` o
        python experiments/policy_data/run_cosmos.py <dataset> --demos 0-49 --max 25 --gpus 2,3 --cp 2 \
            --framework <cosmos-framework> --checkpoint <Cosmos3-Super-fp8> --hf_home <hf cache>
 
-   A demo that a running job makes a video for cannot be replaced until that job ends. `--towel_prompt` adds the
-   towel sentence of each reference image (color, material, pattern) to the prompt; `--towel_sentence` changes that
-   sentence (a text with `{color}`, `{material}` and `{pattern}`).
+   A demo that a running job makes a video for cannot be replaced until that job ends. The prompt comes from the
+   spec version of each reference image (v2: a short prompt with the towel sentence of the image, for example "The
+   towel is pewter bamboo fiber, plain, one solid color."), so a video always follows the version of its image.
+   `--spec v3` takes only the images of that version.
 
    Steps 5 and 6 for many groups: `run_queue.py` does them group by group (images, check, retry, Cosmos). It makes
    the images of the next group while Cosmos runs, so the GPUs do not wait between groups, and it waits for a
    Cosmos job that already runs on the same GPUs. It does not wait for the review. Give the run_cosmos.py options
    after `--`. `--count N` makes only the next N demos that still need a video (for example 100 = two groups),
-   then stops. Stop it after the running job with `touch <dataset>/.queue_stop`, or at once with Ctrl-C.
+   then stops. `--spec v3` makes the images and videos with version v3; an image of another version that has no
+   video yet is made again as v3 first. Change the version at the start of a group of 50. Stop the queue after the
+   running job with `touch <dataset>/.queue_stop`, or at once with Ctrl-C.
 
        export OPENAI_API_KEY=...
-       python experiments/policy_data/run_queue.py <dataset> --demos 150-749 -- --gpus 2,3 --cp 2 --towel_prompt \
+       python experiments/policy_data/run_queue.py <dataset> --demos 150-749 [--spec v2] -- --gpus 2,3 --cp 2 \
            --framework <cosmos-framework> --checkpoint <Cosmos3-Super-fp8> --hf_home <hf cache> --tools <tools>
 
 7. Review the videos on the review page: the simulator video and the Cosmos video play together, next to the
@@ -200,15 +207,15 @@ its own job.)
 |---|---|---|
 | `sources.csv` | make_dataset.py | demo number -> source run and demo, seed, room camera noise, steps |
 | `replacements.csv` | make_dataset.py | one row per `--replace`: old and new source demo, reason, folder |
-| `refs/references.csv` | make_references.py | how each reference image was made (axes, prompt, source demo, cost) |
+| `refs/references.csv` | make_references.py | how each reference image was made (axes, prompt, source demo, cost, spec version) |
 | `refs/check_references.csv`, `refs/failed_references.txt` | checks/check_references.py | check result per image, with the sha1 of the checked file |
 | `refs_rejected/rejected.csv` | make_references.py | images replaced by `--retry`: scores, reason |
-| `cosmos/<run>/run_config.json` | run_cosmos.py | settings of the Cosmos job and the demos it takes |
-| `cosmos/<run>/<group>/<name>.json` | run_cosmos.py | framework settings of one video, and `policy_data`: source demo, reference image and its sha1, seed |
+| `cosmos/<run>/run_config.json` | run_cosmos.py | settings of the Cosmos job, the demos it takes and the spec versions |
+| `cosmos/<run>/<group>/<name>.json` | run_cosmos.py | framework settings of one video, and `policy_data`: source demo, reference image and its sha1, seed, prompt, spec version |
 | `review.csv` | review.py | the current verdict of each video (key: `<cosmos run>/<name>`): `approved`, `weak` or `rejected`, reference image problem, reasons (ids joined with `;`, the list is `REASONS` in `status.py`), one line |
 | `sim_review.csv` | review.py | the verdict of each simulator demo (demo number and source demo) |
 | `review_history.csv` | review.py | every submitted verdict, with the time |
-| `dataset.csv`, `videos.csv` | status.py | state of every number and every video, made new on every run |
+| `dataset.csv`, `videos.csv` | status.py | state of every number and every video, with the spec version of each image and video, made new on every run |
 
 States in `dataset.csv`: `conflict` (two images or videos for one number, or a file in the wrong folder: fix by
 hand), `needs_replace`, `needs_ref`, `needs_check` (no check result for the file that is there now), `ref_failed`,
@@ -286,8 +293,9 @@ Folder names are fixed by the scripts. Do not rename them or add words.
 - `events.py` - the random camera move at reset.
 - `make_videos.py` - videos, sheets, summary (no GPU).
 - `layout.py` - the folder rules (50 demos per folder).
-- `make_references.py`, `variations.py` - reference images with the OpenAI image API; the 7 axes, their lists and
-  the rules.
+- `make_references.py`, `variations.py` - reference images with the OpenAI image API; the rules of the variations
+  (place type shares, strong light) and the loader of the spec files.
+- `specs/<version>.json` - one file per spec version: the axis lists, the image prompt and model, the Cosmos prompt.
 - `make_dataset.py` - one dataset folder from several runs (`--take`), another demo at a number (`--replace`).
 - `status.py` - state of a dataset (`dataset.csv`, `videos.csv`) and the next commands; the lock and csv helpers.
 - `review.py` - review page (web server, standard library only): mark videos O, weak or X with reasons, and check

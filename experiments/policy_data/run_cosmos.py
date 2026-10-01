@@ -1,7 +1,7 @@
 """Make real-looking videos from the demo videos with Cosmos3 (video2video with an edge control video).
 
   python experiments/policy_data/run_cosmos.py <run_dir> --framework <cosmos-framework dir> \
-      --checkpoint <Cosmos3 checkpoint dir> --gpus 2,3 [--cp 2] [--demos 0-49] [--max 25] [--port 29511]
+      --checkpoint <Cosmos3 checkpoint dir> --gpus 2,3 [--cp 2] [--demos 0-49] [--max 25] [--spec v2] [--port 29511]
 
 Input: <run_dir>/demos/000-049/demo_NNN/demo_NNN_geoedge.mp4 (control video) and the reference images in
 <run_dir>/refs/000-049/ (demo_NNN_<tag>.png or demo_NNN.png, checked by checks/check_references.py; 50 demos per
@@ -32,11 +32,14 @@ the dataset takes over its finished videos, if the reference image and the demo 
 
 Settings are the ones of the earlier tests: resolution 480 tier (patched to 1024x512), 81 frames, 16 fps,
 35 steps, guidance 3, control guidance 3, shift 5, seed 0. The framework's default negative prompt is used.
-The prompt is short on purpose: the reference image gives the colors and materials. --prompt replaces it.
---towel_prompt adds the towel sentence of the reference image to the prompt, after its first sentence (for example
-"The towel is pewter bamboo fiber, plain, one solid color."), from refs/references.csv. It helps Cosmos keep the
-towel pattern while the towel moves (the reference image fixes only frame 0). --towel_sentence changes that
-sentence: a text with {color}, {material} and {pattern}, which are filled from refs/references.csv.
+The prompt comes from the spec version of each reference image (column spec of refs/references.csv; the file
+specs/<version>.json, key cosmos, see SPEC.md): a short prompt (the reference image gives the colors and materials)
+and a sentence that is filled from the axes of the image and put after the first sentence of the prompt (v2: "The
+towel is pewter bamboo fiber, plain, one solid color."). The sentence helps Cosmos keep the towel pattern while the
+towel moves (the reference image fixes only frame 0). So a video always follows the version of its image.
+--spec v3 takes only the images of that version; the others are skipped. A json file also works, for tests in a run
+folder: --spec <file.json>. An image that make_references.py did not make (no row in refs/references.csv) gets the
+version of --spec, else SPEC in status.py; its spec needs an empty cosmos sentence.
 The Cosmos3 checkpoint must fit on the given GPUs: Super fp8 needs 2 GPUs (48 GB) with --cp 2, Nano fp8 needs 1.
 The torchrun port is the first free one from 29511 that no running job of the same dataset has taken (--port sets
 it; give --port when jobs of other datasets or run folders start at the same moment).
@@ -64,14 +67,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "che
 import check_references  # noqa: E402
 import layout  # noqa: E402
 import status  # noqa: E402
+import variations  # noqa: E402
 
 N_FRAMES = 81  # frames of every video (spec num_frames)
-PROMPT = (
-    "A Franka robot arm folds a single towel on a table, realistic video. The towel has the same color and texture "
-    "on both sides. The left camera is fixed and the right camera moves with the gripper. Split screen: left, the "
-    "room camera; right, the camera on the robot gripper."
-)
-TOWEL_SENTENCE = "The towel is {color} {material}, {pattern}."  # --towel_prompt; --towel_sentence changes it
 
 
 def ref_video(png: str, mp4: str, frames: int, fps: int) -> None:
@@ -87,22 +85,52 @@ def ref_video(png: str, mp4: str, frames: int, fps: int) -> None:
     os.remove(tmp)
 
 
-def towel_sentences(run_dir: str, template: str = TOWEL_SENTENCE) -> dict:
-    """(reference name, source) -> the towel sentence of the image in refs/ now (the row with the highest attempt;
-    source is "" in a run folder). template has {color}, {material} and {pattern}."""
-    best = {}
-    for r in status.read_csv(f"{run_dir}/refs/references.csv"):
-        k = (r["name"], r.get("source") or "")
-        if k not in best or int(r.get("attempt") or 0) >= int(best[k].get("attempt") or 0):
-            best[k] = r
-    return {k: template.format(color=r["towel_color"], material=r["towel_material"], pattern=r["towel_pattern"])
-            for k, r in best.items() if r.get("towel_color")}
+def load_spec(version: str) -> variations.Spec:
+    try:
+        return variations.load(version)
+    except ValueError as e:
+        sys.exit(str(e))
 
 
-def with_towel(prompt: str, towel: str) -> str:
-    """Put the towel sentence after the first sentence of the prompt."""
-    head, sep, tail = prompt.partition(". ")
-    return f"{head}. {towel} {tail}" if sep else f"{prompt} {towel}"
+def image_version(row: dict | None, chosen: variations.Spec | None) -> str:
+    """The spec version of a reference image: its row of refs/references.csv, else --spec, else SPEC."""
+    if row is not None:
+        return status.row_spec(row)
+    return chosen.version if chosen else status.SPEC
+
+
+def video_prompt(name: str, row: dict | None, chosen: variations.Spec | None) -> tuple:
+    """(spec, prompt) for the video of one reference image: the Cosmos prompt of the version of the image, with the
+    sentence filled from the axes of the image (its row of refs/references.csv)."""
+    version = image_version(row, chosen)
+    try:
+        spec = chosen if chosen and chosen.version == version else variations.load(version)
+    except ValueError as e:
+        sys.exit(f"{name}: {e}. For an image of a test spec, give --spec <its json file>")
+    if row is None:
+        if spec.cosmos.get("sentence"):
+            sys.exit(f"{name}: no row in refs/references.csv (an image not made by make_references.py), so the "
+                     f"sentence of spec {spec.version} cannot be filled: use a spec with an empty cosmos sentence")
+        return spec, spec.cosmos["prompt"]
+    try:
+        return spec, spec.cosmos_prompt(row)
+    except (KeyError, IndexError, ValueError) as e:
+        sys.exit(f"{name}: refs/references.csv has no value for {e} of spec {spec.version}")
+
+
+def video_prompts(run_dir: str, pairs: list, sources: dict, chosen: variations.Spec | None) -> dict:
+    """name -> (spec, prompt) for every pair (see video_prompt). Called before the run folder is made, so a wrong
+    spec stops the script before it leaves an empty folder."""
+    rows = status.latest_refs(status.read_csv(f"{run_dir}/refs/references.csv"))
+    return {name: video_prompt(name, rows.get((name, sources.get(name, ""))), chosen) for _, name in pairs}
+
+
+def other_version(pairs: list, rows: dict, sources: dict, chosen: variations.Spec | None) -> list:
+    """The (demo, name) pairs whose image is not of the version of --spec (none without --spec)."""
+    if chosen is None:
+        return []
+    return [(i, n) for i, n in pairs
+            if image_version(rows.get((n, sources.get(n, ""))), chosen) != chosen.version]
 
 
 def spec(name: str, control: str, ref: str, prompt: str, seed: int, steps: int) -> dict:
@@ -198,11 +226,14 @@ def dataset_pairs(ds: str, wanted: list | None, max_n: int | None, args, stack) 
     with status.lock(ds):
         rows, _, _ = status.collect(ds)
         take_over(ds, rows)
-        chosen, sources, taken = [], {}, []
+        chosen, sources, taken, other = [], {}, [], []
         for r in rows:
             if wanted is not None and r["demo"] not in wanted:
                 continue
             if r["state"] == "needs_video" and not r["note"]:
+                if args.spec and r["spec"] and r["spec"] != args.spec.version:
+                    other.append(r["demo"])
+                    continue
                 chosen.append((r["demo"], r["reference"]))
                 sources[r["reference"]] = r["source"]
             elif r["state"] == "needs_video":
@@ -210,6 +241,9 @@ def dataset_pairs(ds: str, wanted: list | None, max_n: int | None, args, stack) 
             elif wanted is not None:
                 print(f"{layout.demo_name(r['demo'])}: {r['state']}{', ' + r['note'] if r['note'] else ''}, skipped",
                       flush=True)
+        if other:
+            print(f"demos {status.ranges(other)}: the reference image is not spec {args.spec.version}, skipped",
+                  flush=True)
         if max_n is not None:
             chosen = chosen[:max_n]
         if not chosen:
@@ -217,13 +251,14 @@ def dataset_pairs(ds: str, wanted: list | None, max_n: int | None, args, stack) 
                 runs = sorted({t["note"][len("cosmos running ("):-1] for t in taken})
                 sys.exit(f"all {len(taken)} ready demos are taken by running jobs: {', '.join(runs)}")
             sys.exit("no demo is ready for a video (state needs_video): see status.py")
+        prompts = video_prompts(ds, chosen, sources, args.spec)
         busy = {c.get("port") for c in status.running_cosmos(ds).values()}  # a job may not listen on it yet
         out = new_run_folder(ds, args.checkpoint)
         stack.enter_context(status.lock(out, status.RUNNING_LOCK))
         status.write_json(f"{out}/run_config.json", {"demos": [i for i, _ in chosen],
                                                     "references": [n for _, n in chosen], "gpus": args.gpus,
                                                     "port": args.port or free_port(skip=busy)})
-    return out, chosen, sources
+    return out, chosen, sources, prompts
 
 
 def place_video(out: str, idx: int, name: str, meta: dict) -> bool:
@@ -309,12 +344,9 @@ def main():
     ap.add_argument("--gpus", default="0", help="GPU indices, comma separated (default 0)")
     ap.add_argument("--cp", type=int, default=1, help="context parallel size (2 for Super fp8 on 2 GPUs)")
     ap.add_argument("--port", type=int, default=None, help="torchrun master port (default: the first free from 29511)")
-    ap.add_argument("--prompt", default=PROMPT)
-    ap.add_argument("--towel_prompt", action="store_true",
-                    help="add the towel sentence of each reference image to the prompt (see above)")
-    ap.add_argument("--towel_sentence", default=TOWEL_SENTENCE,
-                    help=f'with --towel_prompt: the sentence, with {{color}}, {{material}} and {{pattern}} '
-                         f'(default "{TOWEL_SENTENCE}")')
+    ap.add_argument("--spec", default=None,
+                    help="make videos only for the images of this spec version, e.g. v3 (default: all; each video "
+                         "follows the version of its image); a json file for tests in a run folder")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps", type=int, default=35)
     ap.add_argument("--dry_run", action="store_true", help="write the specs and print the command, do not run")
@@ -325,65 +357,67 @@ def main():
     if not os.path.isdir(run_dir):
         sys.exit(f"no such folder: {run_dir}")
     wanted = status.parse_demos(args.demos)
-    try:
-        args.towel_sentence.format(color="c", material="m", pattern="p")
-    except (KeyError, IndexError, ValueError) as e:
-        sys.exit(f"--towel_sentence: use only {{color}}, {{material}} and {{pattern}} ({e})")
     if args.max is not None and args.max < 1:
         sys.exit("--max must be 1 or more")
     dataset = status.is_dataset(run_dir)
+    args.spec = load_spec(args.spec) if args.spec else None
+    if args.spec and dataset and os.path.dirname(args.spec.path) != variations.SPECS_DIR:
+        sys.exit(f"--spec {args.spec.path}: a dataset uses only the versions in specs/ "
+                 f"({', '.join(variations.versions())}); a json file is for tests in a run folder")
     with contextlib.ExitStack() as stack:
         if dataset:
             if args.skip_check:
                 sys.exit("--skip_check is not used in a dataset folder: status.py decides which images are ready")
-            out, pairs, sources = dataset_pairs(run_dir, wanted, args.max, args, stack)
+            out, pairs, sources, prompts = dataset_pairs(run_dir, wanted, args.max, args, stack)
         else:
             pairs = checked_references(run_dir, wanted, args.skip_check)
+            rows = status.latest_refs(status.read_csv(f"{run_dir}/refs/references.csv"))
+            other = other_version(pairs, rows, {}, args.spec)
+            if other:
+                print(f"{', '.join(n for _, n in other)}: the reference image is not spec {args.spec.version}, "
+                      "skipped", flush=True)
+                pairs = [p for p in pairs if p not in other]
             if args.max is not None:
                 pairs = pairs[:args.max]
             if not pairs:
                 sys.exit("no reference images to run")
-            out, sources = new_run_folder(run_dir, args.checkpoint), {}
-        code = run(args, run_dir, out, pairs, sources, dataset)
+            sources, prompts = {}, video_prompts(run_dir, pairs, {}, args.spec)
+            out = new_run_folder(run_dir, args.checkpoint)
+        code = run(args, run_dir, out, pairs, sources, prompts, dataset)
     if dataset and not args.dry_run:  # after .running.lock is free, so the numbers no longer count as running
         status.update(run_dir)
     sys.exit(code)
 
 
-def run(args, run_dir: str, out: str, pairs: list, sources: dict, dataset: bool) -> int:
-    """Write the specs, run the framework, move the videos to their group folders. -> exit code"""
+def run(args, run_dir: str, out: str, pairs: list, sources: dict, prompts: dict, dataset: bool) -> int:
+    """Write the specs, run the framework, move the videos to their group folders. prompts: name -> (spec, prompt)
+    (video_prompts). -> exit code"""
     os.makedirs(f"{out}/specs", exist_ok=True)
     os.makedirs(f"{out}/refs", exist_ok=True)
     config = json.load(open(f"{out}/run_config.json")) if os.path.isfile(f"{out}/run_config.json") else {}
     port = config.get("port") or args.port or free_port()
     config.update({"checkpoint": os.path.abspath(args.checkpoint), "demos": [i for i, _ in pairs],
-                   "references": [n for _, n in pairs], "prompt": args.prompt, "towel_prompt": args.towel_prompt,
-                   "towel_sentence": args.towel_sentence if args.towel_prompt else "", "seed": args.seed,
-                   "steps": args.steps, "gpus": args.gpus, "cp": args.cp, "port": port, "spec": status.SPEC,
-                   "started": time.strftime("%Y-%m-%dT%H:%M:%S")})
+                   "references": [n for _, n in pairs], "seed": args.seed, "steps": args.steps, "gpus": args.gpus,
+                   "cp": args.cp, "port": port, "started": time.strftime("%Y-%m-%dT%H:%M:%S")})
     status.write_json(f"{out}/run_config.json", config)
     specs, meta = [], {}
-    towels = towel_sentences(run_dir, args.towel_sentence) if args.towel_prompt else {}
     for idx, name in pairs:
         control = f"{layout.demo_dir(run_dir, idx)}/{layout.demo_name(idx)}_geoedge.mp4"
         ref = f"{layout.ref_dir(run_dir + '/refs', idx)}/{name}.png"
         for path in (control, ref):
             if not os.path.isfile(path):
                 sys.exit(f"missing: {path}")
-        prompt = args.prompt
-        if args.towel_prompt:
-            towel = towels.get((name, sources.get(name, "")))
-            if not towel:
-                sys.exit(f"{name}: no towel sentence in refs/references.csv (an image not made by make_references.py?)")
-            prompt = with_towel(args.prompt, towel)
+        vspec, prompt = prompts[name]
         meta[name] = {"source": sources.get(name, ""), "reference": name, "reference_sha1": status.file_sha1(ref),
-                      "seed": args.seed, "cosmos_run": os.path.basename(out), "prompt": prompt, "spec": status.SPEC}
+                      "seed": args.seed, "cosmos_run": os.path.basename(out), "prompt": prompt,
+                      "spec": vspec.version}
         ref_mp4 = f"{out}/refs/{name}.mp4"
         ref_video(ref, ref_mp4, frames=81, fps=16)
         path = f"{out}/specs/{name}.json"
         with open(path, "w") as f:
             json.dump(spec(name, control, ref_mp4, prompt, args.seed, args.steps), f, indent=1)
         specs.append(path)
+    config["spec"] = ",".join(sorted({v.version for v, _ in prompts.values()}))  # each video json has its own
     config["policy_data"] = meta  # lets a later job take over the videos if this one ends without moving them
     status.write_json(f"{out}/run_config.json", config)
 

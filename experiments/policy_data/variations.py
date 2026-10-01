@@ -1,330 +1,56 @@
-"""Variation table for the reference images. All lists live here. They are the same as the reference image spec.
+"""Variations of the reference images. The lists and the prompts of each spec version are in specs/<version>.json
+(see SPEC.md, change history). The rules of the dataset (place type shares, strong light slots) are here and are the
+same for every version, so the shares stay exact when a dataset mixes versions.
 
-Every reference image gets one value on each of 7 axes: place, table, lighting, robot, towel color, towel material
-and towel pattern. All 7 axes change in every image. Generation rules:
-- place: first a place type, then a place inside it. The types are exact in every group of BLOCK (50) demos, the
-  same groups as the demo folders (000-049, 050-099, ...): 10 outdoor (OUTDOOR_SHARE, 20%) and 4 of each of the 10
-  indoor types (8% each). The 50 types of a group are shuffled over its demos. Places inside a type have the same
-  chance.
-- lighting: indoor lighting for an indoor place, outdoor lighting for an outdoor place. No light comes from the left
-  or the right: the image model draws such a light the same way in both halves, which is wrong for the wrist camera
-  (it looks another way and moves). In every group of BLOCK
-  demos, STRONG_PER_BLOCK (2, 4%) of the indoor demos get strong colored ambient light instead (red, green, blue or
-  yellow, as in CRAFT).
-- other axes: every item has the same chance. The towel pattern is plain or a subtle weave only (see TOWEL_PATTERNS).
+Every reference image gets one value on each axis of its spec (v2: place, table, lighting, robot, towel color,
+towel material and towel pattern). All axes change in every image. Generation rules:
+- place: first a place type, then a place of that type from the spec. The types are exact in every group of BLOCK
+  (50) demos, the same groups as the demo folders (000-049, 050-099, ...): 10 outdoor (OUTDOOR_SHARE, 20%) and 4 of
+  each of the 10 indoor types (8% each). The 50 types of a group are shuffled over its demos. Places inside a type
+  have the same chance.
+- lighting: indoor lighting for an indoor place, outdoor lighting for an outdoor place. In every group of BLOCK
+  demos, STRONG_PER_BLOCK (2, 4%) of the indoor demos get strong colored ambient light instead.
+- other axes: every item has the same chance.
 - no repeat: draw() never returns a combination whose key() is in `used`.
-A new attempt for the same image (make_references.py --retry) keeps the place type and the strong light slot and
-draws the rest again, so the shares stay exact. Each tag (01, 02, ...) has its own shuffle.
+The place type and the strong light slot depend on the demo, the seed and the tag only, not on the attempt or the
+spec version. A new attempt for the same image (make_references.py --retry) keeps them and draws the rest again.
+Each tag (01, 02, ...) has its own shuffle.
 
-    v = draw(demo=2, seed=0)         # same demo, seed, attempt and tag -> same choice
-    text = sentence(v)               # the sentences for the prompt
-    key(v)                           # tuple of the 7 values
+    spec = load("v2")                # specs/v2.json; a path to a json file also works (for tests)
+    v = spec.draw(demo=2, seed=0)    # same demo, seed, attempt and tag -> same choice
+    spec.sentence(v)                 # the axis sentences for the image prompt
+    spec.image_prompt(v)             # the whole image prompt
+    spec.cosmos_prompt(v)            # the Cosmos prompt with the towel sentence of this image
+    spec.key(v)                      # tuple of the axis values
+
+Spec file (json): "version" (the name, the same as the file name), "changes" (what is new in this version),
+"image" (model, quality, size and prompt of the image API; the prompt has {variation} once, where the axis sentences
+go), "axes" (the list of axes, in order), "sentence" (the axis sentences, with {<axis name>}), "cosmos" (prompt, and
+sentence: filled from the axes and put after the first sentence of the prompt; "" for none), "card" (one line for the
+review page, with {<axis name>}). Axis "place" has "places" (place type -> list, every type of PLACE_TYPES), axis
+"lighting" has "indoor" ("{source}, {color}, {level}" with the lists indoor_sources, indoor_colors, indoor_levels),
+"strong" ("{color}" with strong_colors) and "outdoor" (a list). Every other axis has "values" (a list). "note" is
+free text. The draw order is lighting first, then the other axes in order (as in v1 and v2).
 """
 
+import glob
+import json
+import os
 import random
 
+SPECS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "specs")
 OUTDOOR_SHARE = 0.2
 BLOCK = 50  # the place type shares are exact in every group of BLOCK demos
 STRONG_PER_BLOCK = 2  # indoor demos with strong colored light in every group of BLOCK demos (4%)
-
-# Place type -> places. Used as "The scene is in {place}."
-PLACES = {
-    "laboratory": [
-        "a robotics laboratory with equipment, cables and shelves in the background",
-        "a university robotics lab with a whiteboard and desks behind",
-        "a small research lab with monitors and a rack of electronics behind",
-        "a bright lab with white walls and a row of computers behind",
-        "a lab with black curtains hanging behind the table",
-        "a lab with a plain gray wall and a fire extinguisher in the corner",
-        "a lab with glass partitions and offices behind",
-        "a lab with metal shelves full of boxes and parts behind",
-        "a lab with a large window and a parking lot outside",
-        "a lab with a second robot arm standing idle in the background",
-        "a lab with a 3D printer and a soldering station behind",
-        "a lab with a big screen showing a plot on the back wall",
-        "a lab with cardboard boxes stacked against the wall",
-        "a lab with a workbench and hand tools behind",
-        "a lab with a blue safety fence around the work area",
-        "a lab with a poster wall and a coffee machine behind",
-        "a lab with a concrete floor and yellow floor markings",
-        "a lab with white acoustic panels on the wall",
-        "a lab with an open door to a corridor behind",
-        "a lab with a camera tripod and lights standing behind",
-        "a lab with a drone on a shelf and cables on the wall",
-        "a lab with a fume hood and chemical bottles behind",
-        "a lab with server racks with blinking lights behind",
-        "a lab with a treadmill and motion capture cameras behind",
-        "a lab with a ping-pong table pushed against the wall",
-        "a lab with a mobile robot parked in the corner",
-        "a lab with a tool cabinet and a vise behind",
-        "a lab with a dark green chalkboard behind",
-        "a lab with plants on the window sill",
-        "a lab with a cluttered desk and a chair behind",
-        "a clean room with smooth white panels and blue light",
-        "a chemistry lab with glassware on the shelves behind",
-        "a biology lab with microscopes and a fridge behind",
-    ],
-    "workshop": [
-        "a workshop with tools hanging on a pegboard",
-        "a wood workshop with sawdust and planks behind",
-        "a metal workshop with a lathe and a drill press behind",
-        "a car repair garage with a lifted car in the background",
-        "a garage with a rolling door and shelves of boxes",
-        "a bike repair shop with wheels hanging on the wall",
-        "a makerspace with 3D printers and colorful filament spools",
-        "an electronics repair shop with circuit boards on shelves",
-        "a sewing workshop with fabric rolls behind",
-        "a pottery studio with shelves of clay pots",
-        "a subway workshop with train parts behind",
-    ],
-    "factory_warehouse": [
-        "a factory hall with machines and safety railings far behind",
-        "a factory with conveyor belts in the background",
-        "a packaging plant with stacks of cardboard boxes",
-        "a clean assembly line with white walls and bright light",
-        "a textile factory with rolls of cloth behind",
-        "a warehouse with tall pallet racks far behind",
-        "a warehouse with a forklift parked in the background",
-        "a logistics center with parcels on shelves",
-        "a cold storage room with steel walls",
-        "a loading dock with an open roller door",
-        "an aircraft hangar with a plane far behind",
-        "a shipyard hall with steel plates and cranes",
-    ],
-    "office": [
-        "an office with desks, monitors and chairs behind",
-        "a bright office room with a plain white wall",
-        "an open-plan office with glass meeting rooms behind",
-        "a meeting room with a long table and a screen behind",
-        "a reception area with a sofa and plants",
-        "an office corner with a filing cabinet and a printer",
-        "a coworking space with brick walls and hanging lamps",
-        "a call center with rows of desks behind",
-        "a small startup office with sticky notes on the wall",
-        "an office kitchen with a fridge and cabinets behind",
-        "a conference room with flags and a podium",
-        "a control room with many screens on the wall",
-        "a security office with monitors behind",
-        "a server room with racks and blue lights",
-        "a data center corridor with cold air ducts",
-        "a print shop with large printers and paper stacks",
-    ],
-    "school": [
-        "a classroom with a chalkboard and rows of chairs",
-        "a lecture hall with tiered seats behind",
-        "a school science room with posters and sinks",
-        "a library with tall bookshelves behind",
-        "a study room with wooden desks and lamps",
-        "a computer classroom with monitors on every desk",
-        "a kindergarten room with small chairs and drawings on the wall",
-        "a university hallway with lockers behind",
-        "a student lounge with bean bags and a vending machine",
-        "an art classroom with easels and paint stains",
-        "a science fair hall with poster boards",
-    ],
-    "home": [
-        "a home kitchen with tiled walls and cabinets",
-        "a modern kitchen with white cabinets and a window",
-        "a living room with a sofa and a bookshelf behind",
-        "a living room with a TV and a plant in the corner",
-        "a dining room with a wooden cabinet and framed pictures",
-        "a bedroom with a bed and a wardrobe behind",
-        "a home office with a desk, a lamp and books",
-        "a laundry room with a washing machine and shelves",
-        "a hallway of a house with coats hanging on hooks",
-        "a small apartment with a balcony door behind",
-        "a loft with exposed brick walls and large windows",
-        "a basement with pipes on the ceiling and a concrete wall",
-    ],
-    "medical_care": [
-        "a hospital room with a bed and medical equipment behind",
-        "a clinic with white cabinets and a sink",
-        "a nursing home lounge with armchairs",
-        "a pharmacy with shelves of boxes behind",
-        "a dental office with a chair and lamp behind",
-        "a physiotherapy room with exercise balls and mats",
-        "a veterinary clinic with cages and a scale",
-        "a rehabilitation center with parallel bars and mats",
-        "a hospital corridor with a gurney and handrails",
-        "a medical storage room with boxes of supplies on shelves",
-    ],
-    "shop_restaurant_hotel": [
-        "a small grocery store with shelves of goods",
-        "a clothing store with racks of clothes behind",
-        "a department store with folded clothes on tables",
-        "a hardware store aisle with tools on hooks",
-        "a furniture showroom with sofas and lamps",
-        "an electronics store with TVs on the wall",
-        "a flower shop with buckets of flowers",
-        "a hotel room with a bed and curtains behind",
-        "a hotel laundry with carts of folded linen",
-        "a restaurant kitchen with steel counters and pots",
-        "a cafe with a counter, cups and a chalk menu behind",
-        "a bakery with racks of bread behind",
-        "a cafeteria with tables and chairs far behind",
-        "a bar with bottles on shelves behind",
-    ],
-    "studio_venue_sports": [
-        "a photo studio with a white seamless backdrop",
-        "a photo studio with a gray backdrop and softboxes",
-        "a TV studio with cameras and lights behind",
-        "a recording studio with foam panels on the wall",
-        "a theater backstage with ropes and props",
-        "a museum hall with glass cases behind",
-        "an art gallery with white walls and paintings",
-        "a science museum with an exhibit behind",
-        "an exhibition booth with banners and a curtain behind",
-        "a trade show hall with many booths far behind",
-        "a robotics competition arena with a crowd far behind",
-        "a gym with weights and mirrors behind",
-        "a yoga studio with wooden floors and mats",
-        "a locker room with metal lockers and benches",
-        "a sports hall with a basketball hoop far behind",
-    ],
-    "other_indoor": [
-        "a post office with parcels and counters",
-        "a bank branch with counters and glass",
-        "a community center with folding tables and chairs",
-        "a shipping container converted into a workspace",
-        "a greenhouse with plants and glass walls",
-        "a modern hallway with glass walls and plants",
-        "an elevator lobby with steel doors behind",
-        "a laundromat with rows of washing machines",
-        "a mailroom with sorting shelves",
-        "a storage room with metal shelves and plastic bins",
-        "a dry cleaner with clothes on a rail",
-        "a tailor shop with a sewing machine and a mannequin",
-        "a copy room with a photocopier and paper boxes",
-        "a service center with devices on repair shelves",
-        "a bicycle storage room with bikes on racks",
-        "a janitor room with a sink and cleaning carts",
-    ],
-    "outdoor": [
-        "a paved university courtyard",
-        "a covered patio with a brick wall behind",
-        "a rooftop terrace with a city skyline far behind",
-        "a backyard with a lawn and a wooden fence",
-        "a garden with flower beds and bushes",
-        "a park with trees and a path behind",
-        "a street market with stalls and awnings behind",
-        "a sidewalk cafe terrace with chairs and umbrellas",
-        "a farm yard with a tractor far behind",
-        "a vegetable field with rows of plants",
-        "an orchard with fruit trees",
-        "a construction site with scaffolding far behind",
-        "a container yard with stacked shipping containers",
-        "a harbor quay with boats in the water",
-        "a beach boardwalk with the sea behind",
-        "a campsite with tents far behind",
-        "a school playground with a climbing frame",
-        "a sports field with goals far behind",
-        "an outdoor research station with instruments on a mast",
-        "a solar panel field",
-        "a village square with old houses",
-        "a mountain hut terrace with mountains behind",
-        "a lakeside dock with trees across the water",
-        "a desert test site with sand and rocks",
-        "a snowy yard with snow on the ground",
-        "a plant nursery with rows of potted plants",
-        "a food stall under a canopy",
-        "an industrial yard with pipes and tanks",
-        "an apartment balcony with potted plants",
-        "a driveway in front of a house with a garage door",
-    ],
-}
-
-# The top surface of the table. Only the surface changes: no other shape, no legs, nothing see-through, no
-# cloth that hangs over the edge. Used as "The table top is {table}."
-TABLES = [
-    "plain gray metal", "old scratched wood", "slightly scratched steel", "glossy white laminate", "gray plastic",
-    "stainless steel", "brushed aluminum", "polished chrome", "rusty steel", "galvanized steel",
-    "blue powder-coated metal", "green metal with chipped paint", "diamond-pattern steel plate", "perforated steel",
-    "marble-look laminate", "white marble", "black marble", "granite", "white quartz", "black slate", "concrete",
-    "terrazzo", "light oak", "dark walnut", "pine with visible grain", "bamboo", "birch plywood", "teak", "cherry wood",
-    "maple", "butcher block wood", "reclaimed wood planks", "black painted wood", "white painted wood",
-    "red painted wood", "beige laminate", "gray laminate", "wood-look laminate", "matte black laminate",
-    "light blue laminate", "mint green laminate", "orange laminate", "white melamine", "unfinished MDF board",
-    "OSB board", "black epoxy resin", "black lab resin", "white lab resin", "gray linoleum", "dark green linoleum",
-    "ceramic tiles", "mosaic tiles", "cork", "leather", "short gray carpet", "a flat green cutting mat",
-    "a flat black rubber mat", "a flat anti-static gray mat", "yellow safety paint", "flat kraft paper",
-]
-
-# Indoor lighting = source + color + level. Used as "The lighting is {source}, {color}, {level}."
-INDOOR_LIGHT_SOURCES = [
-    "fluorescent ceiling panels",
-    "warm ceiling lamps",
-    "a warm spot light from above",
-    "soft light panels over the whole room",
-    "diffuse daylight from a skylight above",
-    "LED strip lights on the ceiling",
-]
-INDOOR_LIGHT_COLORS = [
-    "with a neutral white tone",
-    "with a warm yellow tone",
-    "with a cool blue tone",
-    "with a slight green tone",
-]
-INDOOR_LIGHT_LEVELS = [
-    "bright",
-    "medium bright",
-    "dim, with soft shadows",
-]
-# Strong colored ambient light over the whole scene, indoor only. Used as
-# "The lighting is strong {color} ambient light over the whole scene."
-STRONG_LIGHT_COLORS = ["red", "green", "blue", "yellow"]
-# Outdoor lighting. Used as "The lighting is {light}."
-OUTDOOR_LIGHTS = [
-    "direct midday sun from high above, short hard shadows",
-    "bright sun behind thin clouds, soft shadows",
-    "a bright overcast sky with soft even light",
-    "a dark overcast sky before rain, dim",
-    "open shade under a roof, soft light",
-    "tree shade with spots of sunlight",
-    "hazy sun with a slight blue tone",
-    "blue hour after sunset, dim and cool",
-]
-
-# The robot is the same white Franka arm in the same pose. Only the surface wear changes.
-ROBOTS = [
-    "The robot is brand new and spotless.",
-    "The robot has light scuffs on the joints.",
-    "The robot has some dust on the upper links.",
-    "The robot has worn paint on the gripper fingers.",
-    "The robot has a few fingerprints and smudges.",
-]
-
-# Used as "The towel is {color} {material}, {pattern}."
-TOWEL_COLORS = [
-    "white", "off-white", "ivory", "cream", "beige", "sand", "tan", "khaki", "light gray", "gray", "dark gray",
-    "charcoal", "black", "silver gray", "warm gray", "cool gray", "taupe", "mushroom", "light brown", "brown",
-    "dark brown", "chocolate", "coffee", "caramel", "rust", "terracotta", "brick red", "red", "dark red", "wine red",
-    "burgundy", "cherry red", "coral", "salmon", "peach", "apricot", "orange", "burnt orange", "amber", "mustard",
-    "yellow", "pale yellow", "lemon", "gold", "olive", "olive green", "moss green", "forest green", "dark green",
-    "green", "bright green", "lime", "mint", "sage", "sea green", "teal", "dark teal", "turquoise", "aqua", "cyan",
-    "sky blue", "light blue", "baby blue", "powder blue", "blue", "royal blue", "cobalt blue", "navy", "dark navy",
-    "denim blue", "steel blue", "slate blue", "periwinkle", "lavender", "lilac", "violet", "purple", "dark purple",
-    "plum", "grape", "magenta", "fuchsia", "hot pink", "pink", "light pink", "blush pink", "dusty rose", "rose",
-    "mauve", "berry", "pale green", "pale blue", "pale pink", "pale lavender", "stone", "oatmeal", "linen white",
-    "smoke gray", "ash gray", "pewter",
-]
-TOWEL_MATERIALS = [
-    "terry cloth", "microfiber", "linen", "waffle-weave cotton", "fleece", "plain cotton", "bamboo fiber",
-    "knit cotton",
-]
-# Only patterns that stay the same while the towel is lifted and folded: Cosmos keeps the look of frame 0, but
-# stripes, checks, dots and a darker border faded to a plain towel on the folded part (test of 2026-09-28).
-TOWEL_PATTERNS = [
-    "plain, one solid color",
-    "with a subtle herringbone weave",
-]
-
-FIELDS = ["place", "table", "lighting", "robot", "towel_color", "towel_material", "towel_pattern"]
+# The place types, in the order of the shuffle. Every spec has places for each of them.
+PLACE_TYPES = ["laboratory", "workshop", "factory_warehouse", "office", "school", "home", "medical_care",
+               "shop_restaurant_hotel", "studio_venue_sports", "other_indoor", "outdoor"]
 
 
 def block_types() -> list:
     """The place types of one group of BLOCK demos: OUTDOOR_SHARE outdoor, the rest split equally over the indoor
     types."""
-    indoor = [t for t in PLACES if t != "outdoor"]
+    indoor = [t for t in PLACE_TYPES if t != "outdoor"]
     n_out = round(BLOCK * OUTDOOR_SHARE)
     n_in = (BLOCK - n_out) // len(indoor)
     if n_out + n_in * len(indoor) != BLOCK:
@@ -348,53 +74,156 @@ def strong_light(demo: int, seed: int, tag: str = "") -> bool:
     return demo % BLOCK in random.Random(f"{seed}:{tag}:group{group}:strong").sample(indoor, STRONG_PER_BLOCK)
 
 
-def key(v: dict) -> tuple:
-    """The 7 values that identify one combination."""
-    return tuple(v[f] for f in FIELDS)
+class Spec:
+    """One spec version: the axis lists, the image prompt and the Cosmos prompt."""
+
+    def __init__(self, data: dict, path: str):
+        self.path = path
+        self.version = data["version"]
+        self.image = data["image"]
+        self.cosmos = data["cosmos"]
+        self.template = data["sentence"]
+        self.card_template = data.get("card", "")
+        self.axes = {a["name"]: a for a in data["axes"]}
+        self.fields = [a["name"] for a in data["axes"]]
+
+    def key(self, v: dict) -> tuple:
+        """The axis values that identify one combination."""
+        return tuple(v[f] for f in self.fields)
+
+    def row_key(self, row: dict) -> tuple:
+        """key() of a row of references.csv (empty for an axis the row does not have)."""
+        return tuple(row.get(f) or "" for f in self.fields)
+
+    def draw(self, demo: int, seed: int, used: set | None = None, attempt: int = 0, tag: str = "") -> dict:
+        """One variation for a demo: the axes plus "place_type". Same demo, seed, attempt and tag give the same
+        choice. A combination whose key() is in `used` is skipped, so two images never share a combination."""
+        ptype = place_type(demo, seed, tag)
+        strong = strong_light(demo, seed, tag)
+        light, places = self.axes["lighting"], self.axes["place"]["places"]
+        rng = random.Random(f"{seed}:{tag}:{demo}:{attempt}")
+        for _ in range(1000):
+            if ptype == "outdoor":
+                lighting = rng.choice(light["outdoor"])
+            elif strong:
+                lighting = light["strong"].format(color=rng.choice(light["strong_colors"]))
+            else:
+                lighting = light["indoor"].format(source=rng.choice(light["indoor_sources"]),
+                                                  color=rng.choice(light["indoor_colors"]),
+                                                  level=rng.choice(light["indoor_levels"]))
+            v = {"place_type": ptype}
+            for f in self.fields:
+                if f == "lighting":
+                    v[f] = lighting
+                elif f == "place":
+                    v[f] = rng.choice(places[ptype])
+                else:
+                    v[f] = rng.choice(self.axes[f]["values"])
+            if used is None or self.key(v) not in used:
+                return v
+        raise RuntimeError("no unused combination found")
+
+    def sentence(self, v: dict) -> str:
+        """The axis sentences for the image prompt."""
+        return self.template.format(**v)
+
+    def image_prompt(self, v: dict) -> str:
+        return self.image["prompt"].replace("{variation}", self.sentence(v))
+
+    def cosmos_prompt(self, v: dict) -> str:
+        """The Cosmos prompt, with the sentence of the spec (filled from v) after its first sentence."""
+        prompt, sentence = self.cosmos["prompt"], self.cosmos.get("sentence", "")
+        if not sentence:
+            return prompt
+        head, sep, tail = prompt.partition(". ")
+        text = sentence.format(**v)
+        return f"{head}. {text} {tail}" if sep else f"{prompt} {text}"
+
+    def card(self, v: dict) -> str:
+        """The line for the review page ("" when v does not have the axes)."""
+        try:
+            return self.card_template.format(**v)
+        except (KeyError, IndexError, ValueError):
+            return ""
 
 
-def draw(demo: int, seed: int, used: set | None = None, attempt: int = 0, tag: str = "") -> dict:
-    """One variation for a demo: the 7 axes plus "place_type". Same demo, seed, attempt and tag give the same choice.
-    The place type depends on demo, seed and tag only. A combination whose key() is in `used` is skipped, so two
-    images never share a combination."""
-    ptype = place_type(demo, seed, tag)
-    strong = strong_light(demo, seed, tag)
-    rng = random.Random(f"{seed}:{tag}:{demo}:{attempt}")
-    for _ in range(1000):
-        if ptype == "outdoor":
-            lighting = rng.choice(OUTDOOR_LIGHTS)
-        elif strong:
-            lighting = f"strong {rng.choice(STRONG_LIGHT_COLORS)} ambient light over the whole scene"
-        else:
-            source, color = rng.choice(INDOOR_LIGHT_SOURCES), rng.choice(INDOOR_LIGHT_COLORS)
-            lighting = f"{source}, {color}, {rng.choice(INDOOR_LIGHT_LEVELS)}"
-        v = {
-            "place_type": ptype,
-            "place": rng.choice(PLACES[ptype]),
-            "table": rng.choice(TABLES),
-            "lighting": lighting,
-            "robot": rng.choice(ROBOTS),
-            "towel_color": rng.choice(TOWEL_COLORS),
-            "towel_material": rng.choice(TOWEL_MATERIALS),
-            "towel_pattern": rng.choice(TOWEL_PATTERNS),
-        }
-        if used is None or key(v) not in used:
-            return v
-    raise RuntimeError("no unused combination found")
+def versions() -> list:
+    """The version names in specs/."""
+    return sorted(os.path.basename(p)[: -len(".json")] for p in glob.glob(f"{SPECS_DIR}/*.json"))
 
 
-def sentence(v: dict) -> str:
-    """The variation as text for the prompt."""
-    return (f"The scene is in {v['place']}. The table top is {v['table']}. The lighting is {v['lighting']}. "
-            f"{v['robot']} "
-            f"The towel is {v['towel_color']} {v['towel_material']}, {v['towel_pattern']}.")
+_loaded = {}
+
+
+def load(spec: str) -> Spec:
+    """A spec by version name (v2 -> specs/v2.json) or by the path of a json file (for tests; its version must not
+    be the name of a file in specs/). Raises ValueError with the reason when the file is missing or wrong."""
+    by_path = spec.endswith(".json")
+    path = os.path.abspath(spec if by_path else os.path.join(SPECS_DIR, f"{spec}.json"))
+    if path in _loaded:
+        return _loaded[path]
+    if not os.path.isfile(path):
+        raise ValueError(f"spec {spec}: {path} not found (versions: {', '.join(versions()) or 'none'})")
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        s = Spec(data, path)
+        _check(s)
+    except (KeyError, TypeError, ValueError, AttributeError) as e:
+        raise ValueError(f"spec {spec} ({path}): {type(e).__name__}: {e}") from None
+    if not by_path and s.version != spec:
+        raise ValueError(f"spec {spec}: {path} says version {s.version!r}")
+    if by_path and s.version in versions() and path != os.path.join(SPECS_DIR, f"{s.version}.json"):
+        raise ValueError(f"{path}: version {s.version!r} is the name of specs/{s.version}.json: use another name")
+    _loaded[path] = s
+    return s
+
+
+def _check(s: Spec) -> None:
+    """Check a spec file: every part is there and every template uses known names only."""
+    if not isinstance(s.version, str) or not s.version:
+        raise ValueError("version must be a name")
+    for k in ("model", "quality", "size", "prompt"):
+        if not isinstance(s.image.get(k), str) or not s.image[k]:
+            raise ValueError(f"image.{k} is missing")
+    if s.image["prompt"].count("{variation}") != 1:
+        raise ValueError("image.prompt needs {variation} exactly once")
+    if "place" not in s.axes or "lighting" not in s.axes or len(s.axes) != len(s.fields):
+        raise ValueError("axes need place and lighting, and each name once")
+    places = s.axes["place"].get("places", {})
+    if set(places) != set(PLACE_TYPES) or not all(places[t] for t in PLACE_TYPES):
+        raise ValueError(f"axis place needs places for each of {', '.join(PLACE_TYPES)}")
+    light = s.axes["lighting"]
+    for k in ("indoor_sources", "indoor_colors", "indoor_levels", "strong_colors", "outdoor"):
+        if not isinstance(light.get(k), list) or not light[k]:
+            raise ValueError(f"axis lighting needs the list {k}")
+    light["indoor"].format(source="s", color="c", level="l")
+    light["strong"].format(color="c")
+    for f in s.fields:
+        if f not in ("place", "lighting") and (not isinstance(s.axes[f].get("values"), list)
+                                               or not s.axes[f]["values"]):
+            raise ValueError(f"axis {f} needs a list of values")
+    names = {f: f for f in s.fields} | {"place_type": "place_type"}
+    for where, text in (("sentence", s.template), ("cosmos.sentence", s.cosmos.get("sentence", "")),
+                        ("card", s.card_template)):
+        try:
+            text.format(**names)
+        except KeyError as e:
+            raise ValueError(f"{where} uses {{{e.args[0]}}}, which is not an axis") from None
+    if not isinstance(s.cosmos.get("prompt"), str) or not s.cosmos["prompt"]:
+        raise ValueError("cosmos.prompt is missing")
 
 
 if __name__ == "__main__":
-    n_places = {t: len(p) for t, p in PLACES.items()}
+    import sys
+
+    s = load(sys.argv[1] if len(sys.argv) > 1 else "v2")
+    n_places = {t: len(p) for t, p in s.axes["place"]["places"].items()}
+    print(f"spec {s.version} ({s.path})")
     print(f"places {sum(n_places.values())} {n_places}")
-    n_indoor_light = len(INDOOR_LIGHT_SOURCES) * len(INDOOR_LIGHT_COLORS) * len(INDOOR_LIGHT_LEVELS)
-    print(f"tables {len(TABLES)}, indoor lighting {n_indoor_light} + strong {len(STRONG_LIGHT_COLORS)}, "
-          f"outdoor lighting {len(OUTDOOR_LIGHTS)}, robots {len(ROBOTS)}, towel colors {len(TOWEL_COLORS)}, "
-          f"materials {len(TOWEL_MATERIALS)}, patterns {len(TOWEL_PATTERNS)}")
-    print(sentence(draw(2, 0)))
+    for f in s.fields:
+        if f not in ("place", "lighting"):
+            print(f"{f} {len(s.axes[f]['values'])}")
+    v = s.draw(2, 0)
+    print(s.image_prompt(v))
+    print(s.cosmos_prompt(v))

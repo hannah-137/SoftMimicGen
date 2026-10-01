@@ -1,10 +1,11 @@
 """Make the reference images and the Cosmos videos of a dataset group by group, so the GPUs do not wait.
 
-  python experiments/policy_data/run_queue.py <dataset_dir> [--demos 150-749] [--count 100] -- <run_cosmos.py options>
+  python experiments/policy_data/run_queue.py <dataset_dir> [--demos 150-749] [--count 100] [--spec v2] \
+      -- <run_cosmos.py options>
 
   for example:
   export OPENAI_API_KEY=...
-  python experiments/policy_data/run_queue.py <dataset> --demos 150-749 -- --gpus 2,3 --cp 2 --towel_prompt \
+  python experiments/policy_data/run_queue.py <dataset> --demos 150-749 -- --gpus 2,3 --cp 2 \
       --framework <cosmos-framework> --checkpoint <Cosmos3-Super-fp8> --hf_home <hf cache> --tools <tools>
 
 For each group of 50 demos (000-049, 050-099, ...) in order, it does the same steps as the README:
@@ -28,6 +29,11 @@ step skips what is done.
 
 --count N takes only the first N demos (in --demos) that still need a video, for example --count 100 for the
 next two groups; then the queue stops. Start it again with a new --count to go on.
+--spec v3 makes the new reference images and the videos of these demos with spec version v3 (specs/v3.json, see
+SPEC.md). A demo whose image is of another version and has no video yet gets a new v3 image first (make_references.py
+--redo; the old image goes to refs_rejected/ and counts as an attempt). Without --spec, new images get the default
+version (SPEC in status.py) and every video follows the version of its image. Change the version at the start of a
+group of 50, so each group has one version.
 Stop: create the file <dataset>/.queue_stop to stop after the Cosmos job that runs now (the queue removes the file),
 or press Ctrl-C or send SIGTERM to stop now: run_cosmos.py keeps the videos that are done.
 Needs OPENAI_API_KEY when a group still needs reference images. All output goes to this script's output: send it
@@ -44,6 +50,7 @@ import time
 
 import layout
 import status
+import variations
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STOP_FILE = ".queue_stop"
@@ -95,22 +102,41 @@ class Steps:
                 p.kill()
 
 
-def states(ds: str, demos: list) -> dict:
-    """demo number -> state, for the given demos that no job works on now (column note empty)."""
+def rows_of(ds: str, demos: list) -> dict:
+    """demo number -> row of dataset.csv, for the given demos that no job works on now (column note empty)."""
     with status.lock(ds):
         rows, _, _ = status.collect(ds)
     wanted = set(demos)
-    return {r["demo"]: r["state"] for r in rows if r["demo"] in wanted and not r["note"]}
+    return {r["demo"]: r for r in rows if r["demo"] in wanted and not r["note"]}
 
 
-def make_images(steps: Steps, ds: str, demos: list, max_attempts: int) -> None:
-    """Reference images of one group: make them, check them, and make the failed ones again. A demo without a
-    passed image at the end gets no video now (the log says which)."""
+def states(ds: str, demos: list) -> dict:
+    """demo number -> state, for the given demos that no job works on now."""
+    return {d: r["state"] for d, r in rows_of(ds, demos).items()}
+
+
+def other_spec(row: dict, spec: str) -> bool:
+    """True when --spec is given and the demo has an image of another version but no video yet."""
+    return bool(spec) and row["state"] in ("needs_check", "needs_video") and row["spec"] not in ("", spec)
+
+
+def make_images(steps: Steps, ds: str, demos: list, max_attempts: int, spec: str) -> None:
+    """Reference images of one group: make them (with --spec: also the images of another version that have no
+    video yet), check them, and make the failed ones again. A demo without a passed image at the end gets no video
+    now (the log says which)."""
     group = layout.chunk(demos[0])
-    need = [d for d, s in states(ds, demos).items() if s in NEEDS_IMAGE]
+    spec_args = ["--spec", spec] if spec else []
+    start = rows_of(ds, demos)
+    redo = [d for d, r in start.items() if other_spec(r, spec)]
+    need = sorted({d for d, r in start.items() if r["state"] in NEEDS_IMAGE} | set(redo))
     if not need:
         return
     log(f"{group}: reference images for demos {status.ranges(need)}")
+    if redo:
+        log(f"{group}: images of another spec version, made again as {spec}: demos {status.ranges(redo)}")
+        if steps.run("make_references.py", ds, "--redo", *spec_args, "--reason", f"made again as spec {spec}",
+                     "--demos", *status.ranges(redo).split()):
+            log(f"{group}: make_references.py --redo failed for some images (see above)")
 
     def check():
         unchecked = [d for d, s in states(ds, need).items() if s == "needs_check"]
@@ -127,17 +153,22 @@ def make_images(steps: Steps, ds: str, demos: list, max_attempts: int) -> None:
             break
         codes = []
         if new:
-            codes.append(steps.run("make_references.py", ds, "--demos", *status.ranges(new).split()))
+            codes.append(steps.run("make_references.py", ds, *spec_args, "--demos", *status.ranges(new).split()))
         if failed:
             log(f"{group}: make the failed images again: demos {status.ranges(failed)}")
-            codes.append(steps.run("make_references.py", ds, "--retry", "--demos", *status.ranges(failed).split()))
+            codes.append(steps.run("make_references.py", ds, "--retry", *spec_args, "--demos",
+                                   *status.ranges(failed).split()))
         if any(codes):
             log(f"{group}: make_references.py exit {max(codes)} (some images were not made; the next step tries "
                 "again)")
     check()
-    left = [d for d, s in states(ds, need).items() if s in NEEDS_IMAGE]
+    end = rows_of(ds, need)
+    left = [d for d, r in end.items() if r["state"] in NEEDS_IMAGE]
     if left:
         log(f"{group}: no passed reference image for demos {status.ranges(left)}: they get no video now")
+    old = [d for d, r in end.items() if other_spec(r, spec)]
+    if old:
+        log(f"{group}: the image of demos {status.ranges(old)} is still not spec {spec}: they get no video now")
 
 
 def gpus_of(cosmos_args: list) -> set:
@@ -167,6 +198,9 @@ def main():
     ap.add_argument("--demos", nargs="+", default=None, help="demo numbers and ranges, e.g. 150-749 (default: all)")
     ap.add_argument("--count", type=int, default=None,
                     help="take only the first N demos that still need a video (in --demos), then stop")
+    ap.add_argument("--spec", default=None,
+                    help=f"spec version of new images and videos, e.g. v3 (specs/<version>.json; default: new images "
+                         f"{status.SPEC}, videos the version of their image)")
     args = ap.parse_args(argv[: argv.index("--")] if "--" in argv else argv)
     ds = os.path.abspath(args.dataset_dir)
     if not status.is_dataset(ds):
@@ -175,6 +209,16 @@ def main():
         sys.exit('give the run_cosmos.py options after "--" (at least --framework and --checkpoint)')
     if any(a == "--demos" or a.startswith("--demos=") or a == "--max" for a in cosmos_args):
         sys.exit("do not give --demos or --max after \"--\": the queue gives each job one group")
+    if any(a == "--spec" or a.startswith("--spec=") for a in cosmos_args):
+        sys.exit("give --spec before \"--\": the queue passes it to make_references.py and run_cosmos.py")
+    if args.spec:
+        if args.spec not in variations.versions():
+            sys.exit(f"--spec {args.spec}: no specs/{args.spec}.json (versions: {', '.join(variations.versions())})")
+        try:
+            variations.load(args.spec)
+        except ValueError as e:
+            sys.exit(str(e))
+        cosmos_args += ["--spec", args.spec]
     stop_file = os.path.join(ds, STOP_FILE)
     if os.path.exists(stop_file):
         os.remove(stop_file)
@@ -182,11 +226,11 @@ def main():
     max_attempts = int(status.dataset_config(ds)["max_attempts"])
     gpus = gpus_of(cosmos_args)
 
-    wanted = states(ds, status.parse_demos(args.demos) or range(len(status.current_sources(ds))))
+    wanted = rows_of(ds, status.parse_demos(args.demos) or range(len(status.current_sources(ds))))
     if args.count is not None and args.count < 1:
         sys.exit("--count must be 1 or more")
-    todo = [d for d, s in sorted(wanted.items()) if s in TO_MAKE][: args.count]
-    wanted = {d: s for d, s in wanted.items() if d in todo}
+    todo = [d for d, r in sorted(wanted.items()) if r["state"] in TO_MAKE][: args.count]
+    wanted = {d: r for d, r in wanted.items() if d in todo}
     groups = {}
     for d in todo:
         groups.setdefault(layout.chunk(d), []).append(d)
@@ -194,16 +238,17 @@ def main():
         log("nothing to make")
         status.update(ds)
         return
-    if any(s in NEEDS_IMAGE for s in wanted.values()) and not os.environ.get("OPENAI_API_KEY"):
+    if (any(r["state"] in NEEDS_IMAGE or other_spec(r, args.spec) for r in wanted.values())
+            and not os.environ.get("OPENAI_API_KEY")):
         sys.exit("OPENAI_API_KEY is not set: some groups still need reference images")
     order = sorted(groups)
-    log(f"groups {', '.join(order)} on GPUs {','.join(sorted(gpus))}; stop after the running job: "
-        f"touch {stop_file}")
+    log(f"groups {', '.join(order)} on GPUs {','.join(sorted(gpus))}, spec {args.spec or 'of each image'}; stop "
+        f"after the running job: touch {stop_file}")
 
     steps = Steps()
 
     def images(group):
-        make_images(steps, ds, groups[group], max_attempts)
+        make_images(steps, ds, groups[group], max_attempts, args.spec)
 
     def stopped() -> bool:
         return os.path.exists(stop_file)
@@ -214,7 +259,8 @@ def main():
         the queue goes on if the group got at least one video, and stops (False) if it got none."""
         first = None
         for attempt in (1, 2):
-            ready = [d for d, s in states(ds, groups[group]).items() if s == "needs_video"]
+            ready = [d for d, r in rows_of(ds, groups[group]).items()
+                     if r["state"] == "needs_video" and not other_spec(r, args.spec)]
             first = ready if first is None else first
             if not ready:
                 if attempt == 1:
@@ -225,7 +271,8 @@ def main():
             log(f"{group}: run_cosmos.py exit {code}")
             if code == 0:
                 return True
-        left = [d for d, s in states(ds, groups[group]).items() if s == "needs_video"]
+        left = [d for d, r in rows_of(ds, groups[group]).items()
+                if r["state"] == "needs_video" and not other_spec(r, args.spec)]
         if len(left) < len(first):
             log(f"{group}: still no video for demos {status.ranges(left)} after two jobs: the queue goes on "
                 "without them (run the queue again later to make them)")

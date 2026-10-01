@@ -4,7 +4,9 @@ Two training sets for a diffusion policy:
 - Set A: 750 simulator demos.
 - Set B: set A plus 750 real-looking Cosmos videos, one per demo.
 
-The steps and commands are in README.md. The lists of the reference image axes are in `variations.py`.
+The steps and commands are in README.md. The lists of the reference image axes, the image prompt and the Cosmos
+prompt of each version are in `specs/<version>.json`; the rules that do not change between versions (place type
+shares, strong light slots) are in `variations.py`.
 
 ## Simulator demos
 
@@ -77,11 +79,15 @@ Axes (every image changes all 7 at once):
 
 ## Change history
 
-The scripts write the version of this spec (`SPEC` in `status.py`) with every reference image (column `spec` of
-`refs/references.csv`) and every Cosmos job (`run_config.json`, and `policy_data.spec` in the json of each video).
-The review page shows the version of each video.
+Each version is one file, `specs/<version>.json`. A new version is a new file; the files of the old versions stay
+as they are. `make_references.py`, `run_cosmos.py` and `run_queue.py` take `--spec <version>` (default `SPEC` in
+`status.py`, now v2). The scripts write the version with every reference image (column `spec` of
+`refs/references.csv`) and every Cosmos video (`policy_data.spec` in the json of each video, and `spec` in
+`run_config.json`). A video always follows the version of its reference image. `dataset.csv` and `videos.csv` have
+the version, `status.py` prints the approved count per version, and the review page shows it on each video. Change
+the version at the start of a group of 50 demos.
 
 | Version | Date | Commit | Changes | Reference images | Cosmos videos |
 |---|---|---|---|---|---|
 | v1 | 2026-09-27 | 1910d53 | First spec. Lighting may come from the left, the right or the front. Towel patterns: plain, subtle herringbone, thin stripes, small checks, small dots, darker border. The Cosmos prompt has no towel sentence. | demos 0-49, first images: moved to `refs_rejected/`, except 11, 25, 35, 41 and 45, which follow the v2 rules and stay in use | demos 0-9, run `Cosmos3-Super-fp8_20260928_2118` (moved to `cosmos_archive/`) |
-| v2 | 2026-09-28 | 1ffe58d | No light from the left, the right or the front: the image model drew it the same way in both halves. Towel patterns: plain and subtle herringbone only: the prints faded to plain when the towel folded. The Cosmos prompt has the towel sentence of the reference image (`--towel_prompt`). | demos 0-149 | demos 0-9 (run `Cosmos3-Super-fp8_20260929_0100`), 10-49 (`..._20260929_0347`), 50-99 (`..._20260929_1413`) |
+| v2 | 2026-09-28 | 1ffe58d | No light from the left, the right or the front: the image model drew it the same way in both halves. Towel patterns: plain and subtle herringbone only: the prints faded to plain when the towel folded. The Cosmos prompt has the towel sentence of the reference image. File: `specs/v2.json`. | demos 0-149 | demos 0-9 (run `Cosmos3-Super-fp8_20260929_0100`), 10-49 (`..._20260929_0347`), 50-99 (`..._20260929_1413`) |

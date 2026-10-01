@@ -1,22 +1,29 @@
-"""Make reference images from the frame-0 images with the OpenAI image edit API (gpt-image-2.5-sunburst).
+"""Make reference images from the frame-0 images with the OpenAI image edit API.
 
   export OPENAI_API_KEY=...
-  python experiments/policy_data/make_references.py <run_dir> [--demos 0-49] [--seed 0]
-      [--model gpt-image-2.5-sunburst] [--quality medium] [--size 2048x1024] [--tag 01] [--workers 3]
-      [--retry] [--redo --reason "<why>"] [--max_attempts 3] [--dry_run] [--prompt_file <file>] [--refs <folder>]
+  python experiments/policy_data/make_references.py <run_dir> [--demos 0-49] [--spec v2] [--seed 0]
+      [--model <model>] [--quality <quality>] [--size <WxH>] [--tag 01] [--workers 3]
+      [--retry] [--redo --reason "<why>"] [--max_attempts 3] [--dry_run] [--refs <folder>]
 
 <run_dir> is a run folder (make_demos.sh) or a dataset folder (make_dataset.py).
 Input: <run_dir>/ref_sim/000-049/demo_NNN_ref_sim.png (frame 0, room | wrist, 1024x512, made by make_videos.py).
 Output: <run_dir>/refs/000-049/demo_NNN_<tag>.png (1024x512) and <run_dir>/refs/references.csv with one row per
-image: the 7 axes and the place type, the prompt, the tokens and the cost. --demos takes numbers and ranges
-(0-49 60 70-99); make the images in batches of any size, the ratios do not depend on the batch.
+image: the axes and the place type, the prompt, the tokens, the cost and the spec version. --demos takes numbers and
+ranges (0-49 60 70-99); make the images in batches of any size, the ratios do not depend on the batch.
 
-Every image gets its own variation from variations.py (demo index, seed, tag, attempt): all 7 axes change, the
-place types are exact in every group of 50 demos, and no two images in the csv share a combination. The prompt is
-static on purpose: no action words (they make the model fold the towel), and it lists what must stay the same. The
-API has no seed, so the same call twice gives two different images.
+--spec picks the spec version: v2 means specs/v2.json, which holds the axis lists, the prompt, the model, the
+quality and the size (see SPEC.md). The default is SPEC in status.py (v2). --retry and --redo without --spec keep the
+version of each image; with --spec they make the new image with that version. --model, --quality and --size change
+the values of the spec for this run (the csv keeps the values that were used). A json file also works, for tests:
+--spec <file.json> with a version name that is not in specs/; a dataset folder takes it only with --refs <other
+folder>, so the images of a dataset always follow a version in specs/.
 
-Size: the API needs at least 655,360 pixels, so the image is made at 2048x1024 and resized to 1024x512.
+Every image gets its own variation (variations.py, with the lists of its spec; demo index, seed, tag, attempt): all
+axes change, the place types are exact in every group of 50 demos, and no two images in the csv share a
+combination. The prompt is static on purpose: no action words (they make the model fold the towel), and it lists
+what must stay the same. The API has no seed, so the same call twice gives two different images.
+
+Size: the API needs at least 655,360 pixels, so the image is made at 2048x1024 (v2) and resized to 1024x512.
 Flow: make_references.py -> checks/check_references.py -> make_references.py --retry -> check again -> run_cosmos.py
 Images that already exist are skipped, so the same command again makes only the missing ones (for example after
 an API error or a stop).
@@ -36,9 +43,9 @@ make_dataset.py --replace command for it.
 In a dataset folder (with the default --refs), --seed, --tag and --max_attempts come from its run_config.json
 (variation_seed, tag, max_attempts), so every batch uses the same draw and the ratios stay exact. Other values are
 refused.
---prompt_file uses another prompt: a text file with {variation} where the axis sentences go. --refs writes to another
-folder (default <run_dir>/refs, the replaced images then go to <folder>_rejected). Two folders with the same --tag get
-the same axis sentences, so two prompts can be compared on the same variations.
+--refs writes to another folder (default <run_dir>/refs, the replaced images then go to <folder>_rejected). Two
+folders with the same --tag get the same variations when their specs have the same lists, so two prompts (two spec
+files) can be compared on the same variations.
 An image in the wrong folder is not made again: move it into the group folder of its demo.
 --dry_run prints the prompt and the variations and writes nothing. It needs no API key.
 Only one make_references.py runs on a folder at a time: a second one waits (.make_references.lock in the run folder,
@@ -71,21 +78,12 @@ import variations
 
 OUT_W, OUT_H = 1024, 512
 MIN_PIXELS = 655_360  # smallest image the API makes
-PROMPT = (
-    "Turn this simulator image into a realistic photo. It is a split screen: left the room camera, right the camera on "
-    "the robot gripper. Keep the composition exactly the same in both halves: the same camera viewpoint and framing, "
-    "and the same size and position of the robot, the towel, the table and the background. Keep the same aspect "
-    "ratio. Do not crop, zoom or pad. The robot keeps the same pose. The towel keeps exactly the same position, shape, "
-    "size and orientation. The table keeps the same position, size and shape; only its top surface changes. Do not "
-    "add, remove, move, fold, bend or reshape anything. There is exactly one towel, flat on the table. {variation} "
-    "The towel has the same color and texture on both sides. Change only the materials, textures, lighting and the "
-    "look of the background. No text, no logos, no watermark."
-)
 # USD per 1M tokens, standard rate of gpt-image-2 and gpt-image-2.5-sunburst (2026-09). Only for the cost column;
 # the bill is what OpenAI charges.
 PRICE = {"text": 5.0, "image_in": 8.0, "image_out": 30.0}
-COLUMNS = ["demo", "name", "attempt", "source", "seed", "model", "quality", "size", "place_type", *variations.FIELDS,
-           "prompt", "input_tokens", "output_tokens", "cost_usd", "seconds", "finished_at", "spec"]
+# Columns of refs/references.csv; the axes of the spec of the image go between them.
+FIRST_COLUMNS = ["demo", "name", "attempt", "source", "seed", "model", "quality", "size", "place_type"]
+LAST_COLUMNS = ["prompt", "input_tokens", "output_tokens", "cost_usd", "seconds", "finished_at", "spec"]
 RETRY_WAIT = [15, 30, 60, 120, 240]  # seconds between tries after a rate limit or a server error
 # Error codes of a 429 that means "no credit left" (the error type is insufficient_quota). No retry for these.
 NO_CREDIT_CODES = {"insufficient_quota", "credit_balance_exhausted"}
@@ -93,6 +91,15 @@ NO_CREDIT_CODES = {"insufficient_quota", "credit_balance_exhausted"}
 
 class NoCredit(Exception):
     """The account has no credit left. Every other call would fail too."""
+
+
+def columns(spec: variations.Spec) -> list:
+    return FIRST_COLUMNS + spec.fields + LAST_COLUMNS
+
+
+def api_settings(args, spec: variations.Spec) -> tuple:
+    """(model, quality, size) for an image of this spec: the options, else the values of the spec."""
+    return args.model or spec.image["model"], args.quality or spec.image["quality"], args.size or spec.image["size"]
 
 
 def check_size(size: str) -> None:
@@ -190,11 +197,16 @@ def main():
     ap.add_argument("--demos", nargs="*", default=None,
                     help="demo numbers and ranges, e.g. 0-49 60 (default: every ref_sim image; with --retry: only "
                          "these of the failed ones)")
+    ap.add_argument("--spec", default=None,
+                    help=f"spec version, e.g. v2 (specs/<version>.json; default {status.SPEC}, with --retry or --redo: "
+                         "the version of each image), or a json file for tests")
     ap.add_argument("--seed", type=int, default=None,
                     help="variation seed (default 0; in a dataset: its variation_seed)")
-    ap.add_argument("--model", default="gpt-image-2.5-sunburst")
-    ap.add_argument("--quality", default="medium", help="low, medium, high (auto = the API decides)")
-    ap.add_argument("--size", default="2048x1024", help="size the API makes; the file is resized to 1024x512")
+    ap.add_argument("--model", default=None, help="image model (default: the one of the spec)")
+    ap.add_argument("--quality", default=None,
+                    help="low, medium, high, auto = the API decides (default: the one of the spec)")
+    ap.add_argument("--size", default=None,
+                    help="size the API makes (default: the one of the spec); the file is resized to 1024x512")
     ap.add_argument("--tag", default=None, help="reference number in the file name: demo_NNN_<tag>.png (default 01)")
     ap.add_argument("--workers", type=int, default=3, help="parallel API calls")
     ap.add_argument("--retry", action="store_true", help="make the images in refs/failed_references.txt again")
@@ -203,10 +215,14 @@ def main():
     ap.add_argument("--max_attempts", type=int, default=None,
                     help=f"images per demo at most (default {status.MAX_ATTEMPTS}; in a dataset: its max_attempts)")
     ap.add_argument("--dry_run", action="store_true", help="print the prompt and the variations, call nothing")
-    ap.add_argument("--prompt_file", default=None, help="prompt text with {variation} (default: the prompt here)")
     ap.add_argument("--refs", default=None, help="output folder (default <run_dir>/refs)")
     args = ap.parse_args()
-    check_size(args.size)
+    if args.size:
+        check_size(args.size)
+    try:
+        args.spec = variations.load(args.spec) if args.spec else None
+    except ValueError as e:
+        sys.exit(str(e))
     wanted = status.parse_demos(args.demos)
     if args.redo and (args.retry or not wanted or not args.reason):
         sys.exit('--redo needs --demos and --reason "<why>", and not --retry')
@@ -226,9 +242,10 @@ def main():
     for key, value in fixed.items():
         if getattr(args, key) is None:
             setattr(args, key, value)
-    prompt = open(args.prompt_file).read().strip() if args.prompt_file else PROMPT
-    if prompt.count("{variation}") != 1:
-        sys.exit("the prompt needs {variation} exactly once")
+    if (args.spec and os.path.dirname(args.spec.path) != variations.SPECS_DIR and status.is_dataset(run)
+            and refs == f"{run}/refs"):
+        sys.exit(f"--spec {args.spec.path}: a dataset uses only the versions in specs/ "
+                 f"({', '.join(variations.versions())}); a json file is for tests, with --refs <other folder>")
     if not args.dry_run:
         if not os.environ.get("OPENAI_API_KEY"):
             sys.exit("OPENAI_API_KEY is not set")
@@ -241,14 +258,14 @@ def main():
     # One run per folder: a second one waits here, then sees the images of the first and makes only the rest.
     run_lock = contextlib.nullcontext() if args.dry_run else status.lock(lock_dir, status.REFS_LOCK)
     with run_lock:
-        make(args, run, refs, rejected, prompt, wanted, lock_dir)
+        make(args, run, refs, rejected, wanted, lock_dir)
 
 
-def make(args, run: str, refs: str, rejected: str, prompt: str, wanted: list | None, lock_dir: str) -> None:
+def make(args, run: str, refs: str, rejected: str, wanted: list | None, lock_dir: str) -> None:
     csv_path = f"{refs}/references.csv"
     rows = status.read_csv(csv_path)
     sources = status.current_sources(run)  # empty for a run folder
-    used = {tuple(r[f] for f in variations.FIELDS) for r in rows}
+    used = {}  # spec version -> keys of the combinations in the csv, with the axes of that spec
     attempts = {}  # name -> number of the next attempt (never reused, so every attempt draws a new combination)
     last = {}  # name -> row of the image that is in refs/ now (the highest attempt)
     for r in rows:
@@ -274,6 +291,17 @@ def make(args, run: str, refs: str, rejected: str, prompt: str, wanted: list | N
         files = glob.glob(f"{run}/ref_sim/*/demo_*_ref_sim.png")
         idxs = [layout.demo_index(os.path.basename(f)) for f in files]
     idxs = sorted(set(idxs))
+
+    def spec_for(name: str) -> variations.Spec:
+        """--spec, else the version of the image that --retry or --redo replaces, else SPEC. Exits the script when
+        the version has no file in specs/ (then give --spec)."""
+        if args.spec:
+            return args.spec
+        version = status.row_spec(last[name]) if (args.retry or args.redo) and name in last else status.SPEC
+        try:
+            return variations.load(version)
+        except ValueError as e:
+            sys.exit(f"{name}: {e}; give --spec")
 
     pending = status.pending_replacements(run) if sources else set()
     claimed = status.cosmos_claims(run) if args.redo else {}
@@ -322,10 +350,14 @@ def make(args, run: str, refs: str, rejected: str, prompt: str, wanted: list | N
                   "not made again", flush=True)
             continue
         attempt = attempts.get(name, 0)
-        v = variations.draw(idx, args.seed, used, attempt=attempt, tag=args.tag)
-        used.add(variations.key(v))
-        jobs.append((idx, name, attempt, source, args.seed, src, dst, v,
-                     prompt.replace("{variation}", variations.sentence(v))))
+        spec = spec_for(name)
+        check_size(api_settings(args, spec)[2])
+        if spec.version not in used:
+            used[spec.version] = {spec.row_key(r) for r in rows}
+        taken = used[spec.version]
+        v = spec.draw(idx, args.seed, taken, attempt=attempt, tag=args.tag)
+        taken.add(spec.key(v))
+        jobs.append((idx, name, attempt, source, args.seed, src, dst, v, spec.image_prompt(v), spec))
     if gave_up:
         here = os.path.relpath(os.path.dirname(os.path.abspath(__file__)))
         print(f"reached --max_attempts: demos {status.ranges(gave_up)}")
@@ -342,12 +374,16 @@ def make(args, run: str, refs: str, rejected: str, prompt: str, wanted: list | N
         return
 
     if args.dry_run:
-        print("prompt:", prompt)
-        for idx, name, attempt, source, seed, src, dst, v, text in jobs:
-            print(f"{name} (attempt {attempt}, seed {seed}, {v['place_type']}): {variations.sentence(v)}")
+        specs = {j[9].version: j[9] for j in jobs}
+        for spec in specs.values():
+            print(f"prompt ({spec.version}):", spec.image["prompt"])
+        for idx, name, attempt, source, seed, src, dst, v, text, spec in jobs:
+            print(f"{name} (attempt {attempt}, seed {seed}, {v['place_type']}, {spec.version}): {spec.sentence(v)}")
         types = collections.Counter(j[7]["place_type"] for j in jobs)
-        print("place types:", ", ".join(f"{t} {types.get(t, 0)}" for t in variations.PLACES))
-        print(f"{len(jobs)} images, {args.model} {args.quality} {args.size}, no API call")
+        print("place types:", ", ".join(f"{t} {types.get(t, 0)}" for t in variations.PLACE_TYPES))
+        per_spec = collections.Counter(j[9].version for j in jobs)
+        print(f"{len(jobs)} images, " + ", ".join(f"{n} {v} ({' '.join(api_settings(args, specs[v]))})"
+                                                  for v, n in sorted(per_spec.items())) + ", no API call")
         return
     from openai import OpenAI
 
@@ -356,14 +392,15 @@ def make(args, run: str, refs: str, rejected: str, prompt: str, wanted: list | N
     results = {"ok": 0, "cost": 0.0, "failed": [], "no_credit": False}
 
     def work(job):
-        idx, name, attempt, source, seed, src, dst, v, text = job
+        idx, name, attempt, source, seed, src, dst, v, text, spec = job
+        model, quality, size = api_settings(args, spec)
         if results["no_credit"]:
             with count_lock:
                 results["failed"].append(name)
             return
         t0 = time.time()
         try:
-            img, usage = edit_image(client, args.model, src, text, args.size, args.quality)
+            img, usage = edit_image(client, model, src, text, size, quality)
         except NoCredit as e:
             with count_lock:
                 results["no_credit"] = True
@@ -387,16 +424,16 @@ def make(args, run: str, refs: str, rejected: str, prompt: str, wanted: list | N
         with open(tmp, "wb") as f:
             f.write(png.tobytes())
         cost = cost_usd(usage)
-        row = {"demo": idx, "name": name, "attempt": attempt, "source": source, "seed": seed, "model": args.model,
-               "quality": args.quality, "size": args.size, **v, "prompt": text,
+        row = {"demo": idx, "name": name, "attempt": attempt, "source": source, "seed": seed, "model": model,
+               "quality": quality, "size": size, **v, "prompt": text,
                "input_tokens": getattr(usage, "input_tokens", ""), "output_tokens": getattr(usage, "output_tokens", ""),
                "cost_usd": round(cost, 4), "seconds": round(time.time() - t0, 1),
-               "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "spec": status.SPEC}
+               "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "spec": spec.version}
         with status.lock(lock_dir):
             if os.path.isfile(dst):  # --retry or --redo: keep the replaced image outside refs/
                 why = {**checks.get(name, {}), "reason": f"redo: {args.reason}"} if args.redo else checks.get(name, {})
                 reject(run, rejected, idx, name, dst, last.get(name), why)
-            status.append_csv(csv_path, row, COLUMNS)
+            status.append_csv(csv_path, row, columns(spec))
             os.replace(tmp, dst)
         with count_lock:
             results["ok"] += 1

@@ -7,7 +7,8 @@ requests with the token are served, and only .mp4 and .png files inside the data
 <dataset>/.review_token, so the address stays the same when review.py starts again.
 
 Videos tab: every Cosmos video of the group, with the simulator video (it plays together with the Cosmos video) and
-the reference image side by side, and the variation of the image (place, table, lighting, towel, robot). Mark each
+the reference image side by side, the variation of the image (the line "card" of its spec version, v2: place,
+table, lighting, towel, robot) and the spec version of the video. Mark each
 video Approve (O), Weak (a triangle: usable but weak) or Reject (X). Weak counts as done, like Approve; review.csv
 keeps the word weak, so weak videos can be counted or left out later. With Weak or Reject, tick one or more reasons
 (the list is REASONS in status.py), tick "reference image problem" when the image is the cause (a rejected video is
@@ -55,8 +56,8 @@ import urllib.parse
 
 import layout
 import status
+import variations
 
-FIELDS = ["place", "table", "lighting", "robot", "towel_color", "towel_material", "towel_pattern"]
 SERVED = (".mp4", ".png")
 DEFAULT_PORT = 8765
 REASON_TEXT = dict(status.REASONS)  # the reason list is in status.py
@@ -70,14 +71,15 @@ def reason_text(reasons: str, ref_problem: str, line: str) -> str:
     return "; ".join(parts)
 
 
-def variations(ds: str) -> dict:
-    """(reference name, source) -> row of refs/references.csv with the highest attempt."""
-    out = {}
-    for r in status.read_csv(f"{ds}/refs/references.csv"):
-        k = (r["name"], r.get("source") or "")
-        if k not in out or int(r.get("attempt") or 0) >= int(out[k].get("attempt") or 0):
-            out[k] = r
-    return out
+def card_line(row: dict) -> str:
+    """The variation of a reference image (its row of refs/references.csv) as one line, in the form "card" of its
+    spec version; "" without a row or when the version has no file in specs/."""
+    if not row:
+        return ""
+    try:
+        return variations.load(status.row_spec(row)).card(row)
+    except ValueError:
+        return ""
 
 
 def type_counts(rows: list) -> list:
@@ -105,29 +107,23 @@ def items(ds: str, mode: str, group: str) -> dict:
     """Everything the page shows for one tab and group."""
     with status.lock(ds):
         rows, video_rows, problems = status.collect(ds)
-    var = variations(ds)
+    var = status.latest_refs(status.read_csv(f"{ds}/refs/references.csv"))
     groups = sorted({r["group"] for r in rows})
     group = group if group in groups else (groups[0] if groups else "")
     out = []
     if mode == "videos":
         reviews = {r["video"]: r for r in status.read_csv(f"{ds}/review.csv")}
-        specs = {}  # Cosmos run folder -> the spec version in its run_config.json
+        video_specs = {v["file"]: v["spec"] for v in video_rows}  # the spec version of each video (videos.csv)
         for r in rows:
             if r["group"] != group or not r["video"] or " " in r["video"]:
                 continue  # no video yet, or a conflict (two videos): status.py lists it
             vid = status.video_id(r["video"])
             rev = reviews.get(vid, {})
-            v = var.get((r["reference"], r["source"]), {})
-            run = os.path.dirname(os.path.dirname(f"{ds}/{r['video']}"))
-            if run not in specs:
-                try:
-                    specs[run] = json.load(open(f"{run}/run_config.json")).get("spec", "")
-                except (OSError, ValueError):
-                    specs[run] = ""
             out.append({
                 "key": vid, "demo": r["demo"], "name": r["reference"], "source": r["source"], "state": r["state"],
                 "note": r["note"], "place_type": r["place_type"], "strong_light": str(r["strong_light"]) == "1",
-                "video": vid, "spec": specs[run], "variation": {f: v.get(f, "") for f in FIELDS},
+                "video": vid, "spec": video_specs.get(r["video"], ""),
+                "variation": card_line(var.get((r["reference"], r["source"]))),
                 "files": {"sim": f"demos/{r['group']}/{layout.demo_name(r['demo'])}/{layout.demo_name(r['demo'])}"
                                  "_source.mp4",
                           "cosmos": r["video"],
@@ -677,11 +673,7 @@ function headOf(it) {
 function reviewCard(it, i) {
   const card = el("div", { class: "item", id: "item" + i });
   card.append(headOf(it));
-  if (it.variation) {
-    const v = it.variation;
-    card.append(el("div", { class: "var muted", text: [v.place, `table: ${v.table}`, `light: ${v.lighting}`,
-      `towel: ${v.towel_color} ${v.towel_material}, ${v.towel_pattern}`, v.robot].filter(Boolean).join(" | ") }));
-  }
+  if (it.variation) card.append(el("div", { class: "var muted", text: it.variation }));
   const media = el("div", { class: "media" + (MODE === "sim" ? " two" : "") });
   const sim = el("video", { "data-src": fileUrl(it.files.sim), preload: "none", muted: "", playsinline: "",
     ...(MODE === "sim" ? { controls: "" } : {}) });
