@@ -29,7 +29,8 @@ go), "axes" (the list of axes, in order), "sentence" (the axis sentences, with {
 sentence: filled from the axes and put after the first sentence of the prompt; "" for none), "card" (one line for the
 review page, with {<axis name>}). Axis "place" has "places" (place type -> list, every type of PLACE_TYPES), axis
 "lighting" has "indoor" ("{source}, {color}, {level}" with the lists indoor_sources, indoor_colors, indoor_levels),
-"strong" ("{color}" with strong_colors) and "outdoor" (a list). Every other axis has "values" (a list). "note" is
+"strong" ("{color}" with strong_colors) and "outdoor" (a list). Every other axis has "values": a list, or, with
+"by": "<an earlier axis>", one list per value of that axis (v3: the thicknesses that fit each material). "note" is
 free text. The draw order is lighting first, then the other axes in order (as in v1 and v2).
 """
 
@@ -117,6 +118,8 @@ class Spec:
                     v[f] = lighting
                 elif f == "place":
                     v[f] = rng.choice(places[ptype])
+                elif "by" in self.axes[f]:  # the list depends on the value of an earlier axis
+                    v[f] = rng.choice(self.axes[f]["values"][v[self.axes[f]["by"]]])
                 else:
                     v[f] = rng.choice(self.axes[f]["values"])
             if used is None or self.key(v) not in used:
@@ -199,10 +202,18 @@ def _check(s: Spec) -> None:
             raise ValueError(f"axis lighting needs the list {k}")
     light["indoor"].format(source="s", color="c", level="l")
     light["strong"].format(color="c")
-    for f in s.fields:
-        if f not in ("place", "lighting") and (not isinstance(s.axes[f].get("values"), list)
-                                               or not s.axes[f]["values"]):
-            raise ValueError(f"axis {f} needs a list of values")
+    for i, f in enumerate(s.fields):
+        if f in ("place", "lighting"):
+            continue
+        values, by = s.axes[f].get("values"), s.axes[f].get("by")
+        if by is None:
+            if not isinstance(values, list) or not values:
+                raise ValueError(f"axis {f} needs a list of values")
+            continue
+        if by not in s.fields[:i] or not isinstance(s.axes[by].get("values"), list):
+            raise ValueError(f"axis {f}: by must name an earlier axis with a list of values")
+        if not isinstance(values, dict) or set(values) != set(s.axes[by]["values"]) or not all(values.values()):
+            raise ValueError(f"axis {f} needs a list of values for each value of {by}")
     names = {f: f for f in s.fields} | {"place_type": "place_type"}
     for where, text in (("sentence", s.template), ("cosmos.sentence", s.cosmos.get("sentence", "")),
                         ("card", s.card_template)):
@@ -223,7 +234,9 @@ if __name__ == "__main__":
     print(f"places {sum(n_places.values())} {n_places}")
     for f in s.fields:
         if f not in ("place", "lighting"):
-            print(f"{f} {len(s.axes[f]['values'])}")
+            values = s.axes[f]["values"]
+            print(f"{f} {len(values)}" if isinstance(values, list)
+                  else f"{f} {len({x for group in values.values() for x in group})} (by {s.axes[f]['by']})")
     v = s.draw(2, 0)
     print(s.image_prompt(v))
     print(s.cosmos_prompt(v))
