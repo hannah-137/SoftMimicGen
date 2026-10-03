@@ -99,6 +99,7 @@ REASONS = [
     ("extra_object", "Extra object visible (hand, cable, gripper, text or logo, ...)"),
     ("robot", "Robot problem (ghosting, doubling, melting, pose or motion differs from the simulator, ...)"),
     ("background", "Background problem"),
+    ("wrist_background", "Wrist view background problem"),
     ("lighting", "Lighting problem"),
     ("image_quality", "Image quality problem (blur, smeared, overexposed)"),
     ("views_differ", "Room and wrist views do not match"),

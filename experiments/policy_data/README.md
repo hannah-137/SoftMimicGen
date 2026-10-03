@@ -165,8 +165,8 @@ work again every time: run them once per step. (`--replace` without `--reason` o
    reference image. Mark each video Approve (O), Weak (a triangle: usable but weak) or Reject (X); the keys are A,
    W and R. Weak counts as done, like Approve, and review.csv keeps the word weak for later analysis. With Weak or
    Reject, tick one or more reasons (towel look, towel shape, doubled towel, extra object, robot, background,
-   lighting, image quality, room and wrist views do not match, reference image problem) or write the reason in the
-   line. A weak or rejected video without a reason is saved but counts as not reviewed until it has one. With
+   wrist view background, lighting, image quality, room and wrist views do not match, reference image problem) or
+   write the reason in the line. A weak or rejected video without a reason is saved but counts as not reviewed until it has one. With
    Reject, tick "reference image problem" when the image is the cause: the video is then made again with a new
    image. The filter bar shows all videos, only O, only Weak, only X, or only the ones not reviewed. Submit saves
    the marks (videos without a verdict are not saved); submit again to change them, and the page shows the saved
