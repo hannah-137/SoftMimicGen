@@ -1,6 +1,6 @@
 {
  "version": "v6",
- "changes": "v3 with the floor and fewer materials. Floor: one that fits the place, named in the image prompt and in the Cosmos prompt; before, the wrist view showed a black or wrong area beside the table when the gripper moved. Materials: the 6 that kept their look when folded in the 533 videos of v2-v5 (good in 70% of their v3 videos; v3 overall 55%, v2 15%). Dropped: fabrics whose back side came out as another fabric (waffle-weave cotton, cotton terry, microfiber, linen, cotton canvas, chambray) and fabrics that turned into clothes with hems and ribs (cotton jersey, gabardine, rayon challis). Five color names got a clear color word (sand beige, stone gray, mushroom brown, grape purple, rose pink): with the short names the cloth sometimes stayed the blue of the simulator.",
+ "changes": "v3 with the floor and fewer materials. Floor: one that fits the place, named in the image prompt and in the Cosmos prompt; before, the wrist view showed a black or wrong area beside the table when the gripper moved. Materials: the 6 that kept their look when folded in the 533 videos of v2-v5 (good in 70% of their v3 videos; v3 overall 55%, v2 15%). Dropped: fabrics whose back side came out as another fabric (waffle-weave cotton, cotton terry, microfiber, linen, cotton canvas, chambray) and fabrics that turned into clothes with hems and ribs (cotton jersey, gabardine, rayon challis). Five color names got a clear color word (sand beige, stone gray, mushroom brown, grape purple, rose pink): with the short names the cloth sometimes stayed the blue of the simulator. Condition in short words (brand new, clean, old and worn): the v3 words named a surface look (crisp, faded, pilled) next to \"plain, one solid color\". With \"old and worn, evenly faded and pilled all over\" the texture changed during the video in 18 of 88 videos of v3 and v5 (4 of 159 with the other two conditions).",
  "image": {
   "model": "gpt-image-2.5-sunburst",
   "quality": "medium",
@@ -479,9 +479,9 @@
   {
    "name": "fabric_condition",
    "values": [
-    "brand new and crisp",
-    "clean and soft, washed many times",
-    "old and worn, evenly faded and pilled all over"
+    "brand new",
+    "clean",
+    "old and worn"
    ]
   },
   {
