@@ -304,7 +304,7 @@ Folder names are fixed by the scripts. Do not rename them or add words.
 - `checks/check_references.py` - size and layout check of the reference images.
 - `checks/check_towel_stuck.py` - finds demos where the towel still hangs on the gripper at the last frame.
 - `checks/check_towel_in_view.py` - finds demos where the towel touches the image border in any frame.
-- `run_cosmos.py`, `cosmos_launch.py` - Cosmos3 video2video with the edge control video.
+- `run_cosmos.py`, `cosmos_launch.py` - Cosmos3 video2video with the edge control video (from spec v7 also a depth control video).
 - `run_queue.py` - reference images and Cosmos videos group by group, with no wait on the GPUs between groups.
 
 ## Needs

@@ -41,6 +41,7 @@ import os
 import random
 
 SPECS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "specs")
+CONTROLS = ("edge", "depth")  # control videos that run_cosmos.py can give to Cosmos (key cosmos.controls)
 OUTDOOR_SHARE = 0.2
 BLOCK = 50  # the place type shares are exact in every group of BLOCK demos
 STRONG_PER_BLOCK = 2  # indoor demos with strong colored light in every group of BLOCK demos (4%)
@@ -84,6 +85,7 @@ class Spec:
         self.version = data["version"]
         self.image = data["image"]
         self.cosmos = data["cosmos"]
+        self.controls = data["cosmos"].get("controls", ["edge"])
         self.template = data["sentence"]
         self.card_template = data.get("card", "")
         self.axes = {a["name"]: a for a in data["axes"]}
@@ -225,6 +227,9 @@ def _check(s: Spec) -> None:
             raise ValueError(f"{where} uses {{{e.args[0]}}}, which is not an axis") from None
     if not isinstance(s.cosmos.get("prompt"), str) or not s.cosmos["prompt"]:
         raise ValueError("cosmos.prompt is missing")
+    if (not isinstance(s.controls, list) or "edge" not in s.controls or len(set(s.controls)) != len(s.controls)
+            or not set(s.controls) <= set(CONTROLS)):
+        raise ValueError(f"cosmos.controls must be a list with edge, from {', '.join(CONTROLS)}")
 
 
 if __name__ == "__main__":
@@ -242,3 +247,4 @@ if __name__ == "__main__":
     v = s.draw(2, 0)
     print(s.image_prompt(v))
     print(s.cosmos_prompt(v))
+    print("cosmos controls:", ", ".join(s.controls))

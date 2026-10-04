@@ -1,4 +1,4 @@
-"""Make real-looking videos from the demo videos with Cosmos3 (video2video with an edge control video).
+"""Make real-looking videos from the demo videos with Cosmos3 (video2video with control videos from the simulator).
 
   python experiments/policy_data/run_cosmos.py <run_dir> --framework <cosmos-framework dir> \
       --checkpoint <Cosmos3 checkpoint dir> --gpus 2,3 [--cp 2] [--demos 0-49] [--max 25] [--spec v2] [--port 29511]
@@ -6,7 +6,9 @@
 Input: <run_dir>/demos/000-049/demo_NNN/demo_NNN_geoedge.mp4 (control video) and the reference images in
 <run_dir>/refs/000-049/ (demo_NNN_<tag>.png or demo_NNN.png, checked by checks/check_references.py; 50 demos per
 folder, see layout.py). One video per reference image. Cosmos keeps the reference image as frame 0 and follows the
-edge video.
+edge video. A spec version can add the depth control (key cosmos.controls of specs/<version>.json, from v7): the
+script then makes a depth video from the raw depth in the demo hdf5 of <run_dir> (1 / depth as gray, near is white)
+and gives it to Cosmos next to the edge video, with the same weight.
 
 In a dataset folder (make_dataset.py) the script chooses the demos itself: only the numbers that status.py shows as
 needs_video (the reference image passed its check and is the file that was checked, there is no video yet, no
@@ -24,8 +26,8 @@ Output: <run_dir>/cosmos/<checkpoint folder name>_<YYYYMMDD>_<HHMM>/ (with _2, _
 per reference, 000-049/<name>.mp4 (the video) and 000-049/<name>.json (the settings the framework used, plus
 policy_data: source demo, reference image name and sha1, seed, spec version), and run_config.json, run.log,
 debug.log and benchmark.json at the top. A video goes into its group folder only when it has all 81 frames.
-Temporary files (reference videos, specs, framework folders) are removed after a successful run; after a failure
-everything stays for a look.
+Temporary files (reference videos, depth control videos, specs, framework folders) are removed after a successful
+run; after a failure everything stays for a look.
 Stop a job with Ctrl-C (or kill <pid>): the script stops the framework, keeps the finished videos and ends. The
 same command then makes the rest. When a job ended without that (for example kill -9), the next run_cosmos.py on
 the dataset takes over its finished videos, if the reference image and the demo are still the same.
@@ -133,8 +135,8 @@ def other_version(pairs: list, rows: dict, sources: dict, chosen: variations.Spe
             if image_version(rows.get((n, sources.get(n, ""))), chosen) != chosen.version]
 
 
-def spec(name: str, control: str, ref: str, prompt: str, seed: int, steps: int) -> dict:
-    return {
+def spec(name: str, control: str, ref: str, prompt: str, seed: int, steps: int, depth: str | None = None) -> dict:
+    out = {
         "model_mode": "video2video", "resolution": "480", "aspect_ratio": "16,9", "num_frames": 81, "fps": 16,
         "shift": 5.0, "num_steps": steps, "seed": seed, "num_video_frames_per_chunk": 81, "num_conditional_frames": 1,
         "share_vision_temporal_positions": True, "negative_metadata_mode": "none", "negative_prompt_keep_metadata": False,
@@ -142,6 +144,44 @@ def spec(name: str, control: str, ref: str, prompt: str, seed: int, steps: int) 
         "edge": {"control_path": control, "preset_edge_threshold": "medium"},
         "vision_path": ref, "num_first_chunk_conditional_frames": 1, "prompt": prompt,
     }
+    if depth:
+        out["depth"] = {"control_path": depth}
+    return out
+
+
+def demo_hdf5(run_dir: str) -> str:
+    """The demo file of a run or dataset folder: the one hdf5 without _failed."""
+    path = next((f"{run_dir}/{f}" for f in sorted(os.listdir(run_dir)) if f.endswith(".hdf5") and "_failed" not in f),
+                None)
+    if path is None:
+        sys.exit(f"no hdf5 in {run_dir}")
+    return path
+
+
+def depth_control(h5path: str, demo: int, mp4: str) -> None:
+    """Depth control video of one demo, from its raw depth: 1 / depth as gray, so near is white; nothing rendered is
+    black. Each view is scaled between the 1st and the 99th percentile of its video. Room | wrist, the frames of the
+    edge video, lossless."""
+    import numpy as np
+
+    import make_videos
+
+    with status.open_hdf5(h5path) as h5:
+        obs = h5["data"][f"demo_{demo}"]["obs"]
+        views = []
+        for cam in make_videos.camera_keys(h5, None, None):
+            key = f"{make_videos.prefix(cam)}_depth_raw"
+            if key not in obs:
+                sys.exit(f"{h5path}: no {key} (demos made with --no_raw): the depth control needs the raw depth")
+            d = obs[key][:][make_videos.sample_idx(obs[key].shape[0])][..., 0]
+            ok = np.isfinite(d) & (d > 0)
+            disparity = np.where(ok, 1.0 / np.maximum(d, 1e-6), 0.0)
+            lo, hi = np.percentile(disparity[ok], [1, 99])
+            gray = np.clip((disparity - lo) / max(hi - lo, 1e-6), 0.0, 1.0)
+            gray[~ok] = 0.0
+            views.append(np.repeat(np.round(gray * 255.0).astype(np.uint8)[..., None], 3, axis=-1))
+    frames = [make_videos.tile(a, b) for a, b in zip(*views)]
+    make_videos.write(mp4, frames, make_videos.FPS, make_videos.LOSSLESS_RGB, check=True)
 
 
 def checked_references(run_dir: str, wanted: list | None, skip_check: bool) -> list:
@@ -289,7 +329,7 @@ def tidy(out: str, pairs: list, meta: dict) -> list:
     Returns the names whose video is missing (their folders stay)."""
     missing = [name for idx, name in pairs if not place_video(out, idx, name, meta.get(name, {}))]
     if not missing:
-        for d in ("refs", "specs"):
+        for d in ("refs", "specs", "controls"):
             shutil.rmtree(f"{out}/{d}", ignore_errors=True)
         for f in ("console.log",):
             if os.path.isfile(f"{out}/{f}"):
@@ -394,6 +434,7 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, prompts: dict,
     (video_prompts). -> exit code"""
     os.makedirs(f"{out}/specs", exist_ok=True)
     os.makedirs(f"{out}/refs", exist_ok=True)
+    os.makedirs(f"{out}/controls", exist_ok=True)
     config = json.load(open(f"{out}/run_config.json")) if os.path.isfile(f"{out}/run_config.json") else {}
     port = config.get("port") or args.port or free_port()
     config.update({"checkpoint": os.path.abspath(args.checkpoint), "demos": [i for i, _ in pairs],
@@ -410,12 +451,16 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, prompts: dict,
         vspec, prompt = prompts[name]
         meta[name] = {"source": sources.get(name, ""), "reference": name, "reference_sha1": status.file_sha1(ref),
                       "seed": args.seed, "cosmos_run": os.path.basename(out), "prompt": prompt,
-                      "spec": vspec.version}
+                      "spec": vspec.version, "controls": vspec.controls}
         ref_mp4 = f"{out}/refs/{name}.mp4"
         ref_video(ref, ref_mp4, frames=81, fps=16)
+        depth = None
+        if "depth" in vspec.controls:  # made here from the raw depth of the demo (a temporary file, like ref_mp4)
+            depth = f"{out}/controls/{name}_depth.mp4"
+            depth_control(demo_hdf5(run_dir), idx, depth)
         path = f"{out}/specs/{name}.json"
         with open(path, "w") as f:
-            json.dump(spec(name, control, ref_mp4, prompt, args.seed, args.steps), f, indent=1)
+            json.dump(spec(name, control, ref_mp4, prompt, args.seed, args.steps, depth), f, indent=1)
         specs.append(path)
     config["spec"] = ",".join(sorted({v.version for v, _ in prompts.values()}))  # each video json has its own
     config["policy_data"] = meta  # lets a later job take over the videos if this one ends without moving them
