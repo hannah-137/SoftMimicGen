@@ -1,0 +1,1215 @@
+{
+ "version": "v6",
+ "changes": "v3 with the floor and fewer materials. Floor: one that fits the place, named in the image prompt and in the Cosmos prompt; before, the wrist view showed a black or wrong area beside the table when the gripper moved. Materials: the 6 that kept their look when folded in the 533 videos of v2-v5 (good in 70% of their v3 videos; v3 overall 55%, v2 15%). Dropped: fabrics whose back side came out as another fabric (waffle-weave cotton, cotton terry, microfiber, linen, cotton canvas, chambray) and fabrics that turned into clothes with hems and ribs (cotton jersey, gabardine, rayon challis). Five color names got a clear color word (sand beige, stone gray, mushroom brown, grape purple, rose pink): with the short names the cloth sometimes stayed the blue of the simulator.",
+ "image": {
+  "model": "gpt-image-2.5-sunburst",
+  "quality": "medium",
+  "size": "2048x1024",
+  "prompt": "Turn this simulator image into a realistic photo. It is a split screen: left the room camera, right the camera on the robot gripper. Keep the composition exactly the same in both halves: the same camera viewpoint and framing, and the same size and position of the robot, the fabric, the table and the background. Keep the same aspect ratio. Do not crop, zoom or pad. The robot keeps the same pose. The fabric keeps exactly the same position, shape, size and orientation. The table keeps the same position, size and shape; only its top surface changes. Do not add, remove, move, fold, bend or reshape anything. There is exactly one piece of fabric, flat on the table. {variation} The fabric has the same color and texture on both sides. Change only the materials, textures, lighting and the look of the background. No text, no logos, no watermark."
+ },
+ "axes": [
+  {
+   "name": "place",
+   "note": "Place type -> places. Used as \"The scene is in {place}.\"",
+   "places": {
+    "laboratory": [
+     "a robotics laboratory with equipment, cables and shelves in the background",
+     "a university robotics lab with a whiteboard and desks behind",
+     "a small research lab with monitors and a rack of electronics behind",
+     "a bright lab with white walls and a row of computers behind",
+     "a lab with black curtains hanging behind the table",
+     "a lab with a plain gray wall and a fire extinguisher in the corner",
+     "a lab with glass partitions and offices behind",
+     "a lab with metal shelves full of boxes and parts behind",
+     "a lab with a large window and a parking lot outside",
+     "a lab with a second robot arm standing idle in the background",
+     "a lab with a 3D printer and a soldering station behind",
+     "a lab with a big screen showing a plot on the back wall",
+     "a lab with cardboard boxes stacked against the wall",
+     "a lab with a workbench and hand tools behind",
+     "a lab with a blue safety fence around the work area",
+     "a lab with a poster wall and a coffee machine behind",
+     "a lab with a concrete floor and yellow floor markings",
+     "a lab with white acoustic panels on the wall",
+     "a lab with an open door to a corridor behind",
+     "a lab with a camera tripod and lights standing behind",
+     "a lab with a drone on a shelf and cables on the wall",
+     "a lab with a fume hood and chemical bottles behind",
+     "a lab with server racks with blinking lights behind",
+     "a lab with a treadmill and motion capture cameras behind",
+     "a lab with a ping-pong table pushed against the wall",
+     "a lab with a mobile robot parked in the corner",
+     "a lab with a tool cabinet and a vise behind",
+     "a lab with a dark green chalkboard behind",
+     "a lab with plants on the window sill",
+     "a lab with a cluttered desk and a chair behind",
+     "a clean room with smooth white panels and blue light",
+     "a chemistry lab with glassware on the shelves behind",
+     "a biology lab with microscopes and a fridge behind"
+    ],
+    "workshop": [
+     "a workshop with tools hanging on a pegboard",
+     "a wood workshop with sawdust and planks behind",
+     "a metal workshop with a lathe and a drill press behind",
+     "a car repair garage with a lifted car in the background",
+     "a garage with a rolling door and shelves of boxes",
+     "a bike repair shop with wheels hanging on the wall",
+     "a makerspace with 3D printers and colorful filament spools",
+     "an electronics repair shop with circuit boards on shelves",
+     "a sewing workshop with fabric rolls behind",
+     "a pottery studio with shelves of clay pots",
+     "a subway workshop with train parts behind"
+    ],
+    "factory_warehouse": [
+     "a factory hall with machines and safety railings far behind",
+     "a factory with conveyor belts in the background",
+     "a packaging plant with stacks of cardboard boxes",
+     "a clean assembly line with white walls and bright light",
+     "a textile factory with rolls of cloth behind",
+     "a warehouse with tall pallet racks far behind",
+     "a warehouse with a forklift parked in the background",
+     "a logistics center with parcels on shelves",
+     "a cold storage room with steel walls",
+     "a loading dock with an open roller door",
+     "an aircraft hangar with a plane far behind",
+     "a shipyard hall with steel plates and cranes"
+    ],
+    "office": [
+     "an office with desks, monitors and chairs behind",
+     "a bright office room with a plain white wall",
+     "an open-plan office with glass meeting rooms behind",
+     "a meeting room with a long table and a screen behind",
+     "a reception area with a sofa and plants",
+     "an office corner with a filing cabinet and a printer",
+     "a coworking space with brick walls and hanging lamps",
+     "a call center with rows of desks behind",
+     "a small startup office with sticky notes on the wall",
+     "an office kitchen with a fridge and cabinets behind",
+     "a conference room with flags and a podium",
+     "a control room with many screens on the wall",
+     "a security office with monitors behind",
+     "a server room with racks and blue lights",
+     "a data center corridor with cold air ducts",
+     "a print shop with large printers and paper stacks"
+    ],
+    "school": [
+     "a classroom with a chalkboard and rows of chairs",
+     "a lecture hall with tiered seats behind",
+     "a school science room with posters and sinks",
+     "a library with tall bookshelves behind",
+     "a study room with wooden desks and lamps",
+     "a computer classroom with monitors on every desk",
+     "a kindergarten room with small chairs and drawings on the wall",
+     "a university hallway with lockers behind",
+     "a student lounge with bean bags and a vending machine",
+     "an art classroom with easels and paint stains",
+     "a science fair hall with poster boards"
+    ],
+    "home": [
+     "a home kitchen with tiled walls and cabinets",
+     "a modern kitchen with white cabinets and a window",
+     "a living room with a sofa and a bookshelf behind",
+     "a living room with a TV and a plant in the corner",
+     "a dining room with a wooden cabinet and framed pictures",
+     "a bedroom with a bed and a wardrobe behind",
+     "a home office with a desk, a lamp and books",
+     "a laundry room with a washing machine and shelves",
+     "a hallway of a house with coats hanging on hooks",
+     "a small apartment with a balcony door behind",
+     "a loft with exposed brick walls and large windows",
+     "a basement with pipes on the ceiling and a concrete wall"
+    ],
+    "medical_care": [
+     "a hospital room with a bed and medical equipment behind",
+     "a clinic with white cabinets and a sink",
+     "a nursing home lounge with armchairs",
+     "a pharmacy with shelves of boxes behind",
+     "a dental office with a chair and lamp behind",
+     "a physiotherapy room with exercise balls and mats",
+     "a veterinary clinic with cages and a scale",
+     "a rehabilitation center with parallel bars and mats",
+     "a hospital corridor with a gurney and handrails",
+     "a medical storage room with boxes of supplies on shelves"
+    ],
+    "shop_restaurant_hotel": [
+     "a small grocery store with shelves of goods",
+     "a clothing store with racks of clothes behind",
+     "a department store with folded clothes on tables",
+     "a hardware store aisle with tools on hooks",
+     "a furniture showroom with sofas and lamps",
+     "an electronics store with TVs on the wall",
+     "a flower shop with buckets of flowers",
+     "a hotel room with a bed and curtains behind",
+     "a hotel laundry with carts of folded linen",
+     "a restaurant kitchen with steel counters and pots",
+     "a cafe with a counter, cups and a chalk menu behind",
+     "a bakery with racks of bread behind",
+     "a cafeteria with tables and chairs far behind",
+     "a bar with bottles on shelves behind"
+    ],
+    "studio_venue_sports": [
+     "a photo studio with a white seamless backdrop",
+     "a photo studio with a gray backdrop and softboxes",
+     "a TV studio with cameras and lights behind",
+     "a recording studio with foam panels on the wall",
+     "a theater backstage with ropes and props",
+     "a museum hall with glass cases behind",
+     "an art gallery with white walls and paintings",
+     "a science museum with an exhibit behind",
+     "an exhibition booth with banners and a curtain behind",
+     "a trade show hall with many booths far behind",
+     "a robotics competition arena with a crowd far behind",
+     "a gym with weights and mirrors behind",
+     "a yoga studio with wooden floors and mats",
+     "a locker room with metal lockers and benches",
+     "a sports hall with a basketball hoop far behind"
+    ],
+    "other_indoor": [
+     "a post office with parcels and counters",
+     "a bank branch with counters and glass",
+     "a community center with folding tables and chairs",
+     "a shipping container converted into a workspace",
+     "a greenhouse with plants and glass walls",
+     "a modern hallway with glass walls and plants",
+     "an elevator lobby with steel doors behind",
+     "a laundromat with rows of washing machines",
+     "a mailroom with sorting shelves",
+     "a storage room with metal shelves and plastic bins",
+     "a dry cleaner with clothes on a rail",
+     "a tailor shop with a sewing machine and a mannequin",
+     "a copy room with a photocopier and paper boxes",
+     "a service center with devices on repair shelves",
+     "a bicycle storage room with bikes on racks",
+     "a janitor room with a sink and cleaning carts"
+    ],
+    "outdoor": [
+     "a paved university courtyard",
+     "a covered patio with a brick wall behind",
+     "a rooftop terrace with a city skyline far behind",
+     "a backyard with a lawn and a wooden fence",
+     "a garden with flower beds and bushes",
+     "a park with trees and a path behind",
+     "a street market with stalls and awnings behind",
+     "a sidewalk cafe terrace with chairs and umbrellas",
+     "a farm yard with a tractor far behind",
+     "a vegetable field with rows of plants",
+     "an orchard with fruit trees",
+     "a construction site with scaffolding far behind",
+     "a container yard with stacked shipping containers",
+     "a harbor quay with boats in the water",
+     "a beach boardwalk with the sea behind",
+     "a campsite with tents far behind",
+     "a school playground with a climbing frame",
+     "a sports field with goals far behind",
+     "an outdoor research station with instruments on a mast",
+     "a solar panel field",
+     "a village square with old houses",
+     "a mountain hut terrace with mountains behind",
+     "a lakeside dock with trees across the water",
+     "a desert test site with sand and rocks",
+     "a snowy yard with snow on the ground",
+     "a plant nursery with rows of potted plants",
+     "a food stall under a canopy",
+     "an industrial yard with pipes and tanks",
+     "an apartment balcony with potted plants",
+     "a driveway in front of a house with a garage door"
+    ]
+   }
+  },
+  {
+   "name": "table",
+   "note": "The top surface of the table. Only the surface changes: no other shape, no legs, nothing see-through, no cloth that hangs over the edge. Used as \"The table top is {table}.\"",
+   "values": [
+    "plain gray metal",
+    "old scratched wood",
+    "slightly scratched steel",
+    "glossy white laminate",
+    "gray plastic",
+    "stainless steel",
+    "brushed aluminum",
+    "polished chrome",
+    "rusty steel",
+    "galvanized steel",
+    "blue powder-coated metal",
+    "green metal with chipped paint",
+    "diamond-pattern steel plate",
+    "perforated steel",
+    "marble-look laminate",
+    "white marble",
+    "black marble",
+    "granite",
+    "white quartz",
+    "black slate",
+    "concrete",
+    "terrazzo",
+    "light oak",
+    "dark walnut",
+    "pine with visible grain",
+    "bamboo",
+    "birch plywood",
+    "teak",
+    "cherry wood",
+    "maple",
+    "butcher block wood",
+    "reclaimed wood planks",
+    "black painted wood",
+    "white painted wood",
+    "red painted wood",
+    "beige laminate",
+    "gray laminate",
+    "wood-look laminate",
+    "matte black laminate",
+    "light blue laminate",
+    "mint green laminate",
+    "orange laminate",
+    "white melamine",
+    "unfinished MDF board",
+    "OSB board",
+    "black epoxy resin",
+    "black lab resin",
+    "white lab resin",
+    "gray linoleum",
+    "dark green linoleum",
+    "ceramic tiles",
+    "mosaic tiles",
+    "cork",
+    "leather",
+    "short gray carpet",
+    "a flat green cutting mat",
+    "a flat black rubber mat",
+    "a flat anti-static gray mat",
+    "yellow safety paint",
+    "flat kraft paper"
+   ]
+  },
+  {
+   "name": "lighting",
+   "note": "Indoor place: indoor = source, color and level. Strong slots (indoor only): strong colored ambient light. Outdoor place: one of outdoor. No light from the left or the right: the image model draws it the same way in both halves, which is wrong for the wrist camera.",
+   "indoor": "{source}, {color}, {level}",
+   "indoor_sources": [
+    "fluorescent ceiling panels",
+    "warm ceiling lamps",
+    "a warm spot light from above",
+    "soft light panels over the whole room",
+    "diffuse daylight from a skylight above",
+    "LED strip lights on the ceiling"
+   ],
+   "indoor_colors": [
+    "with a neutral white tone",
+    "with a warm yellow tone",
+    "with a cool blue tone",
+    "with a slight green tone"
+   ],
+   "indoor_levels": [
+    "bright",
+    "medium bright",
+    "dim, with soft shadows"
+   ],
+   "strong": "strong {color} ambient light over the whole scene",
+   "strong_colors": [
+    "red",
+    "green",
+    "blue",
+    "yellow"
+   ],
+   "outdoor": [
+    "direct midday sun from high above, short hard shadows",
+    "bright sun behind thin clouds, soft shadows",
+    "a bright overcast sky with soft even light",
+    "a dark overcast sky before rain, dim",
+    "open shade under a roof, soft light",
+    "tree shade with spots of sunlight",
+    "hazy sun with a slight blue tone",
+    "blue hour after sunset, dim and cool"
+   ]
+  },
+  {
+   "name": "robot",
+   "note": "The robot is the same white Franka arm in the same pose. Only the surface wear changes.",
+   "values": [
+    "The robot is brand new and spotless.",
+    "The robot has light scuffs on the joints.",
+    "The robot has some dust on the upper links.",
+    "The robot has worn paint on the gripper fingers.",
+    "The robot has a few fingerprints and smudges."
+   ]
+  },
+  {
+   "name": "fabric_color",
+   "values": [
+    "white",
+    "off-white",
+    "ivory",
+    "cream",
+    "beige",
+    "sand beige",
+    "tan",
+    "khaki",
+    "light gray",
+    "gray",
+    "dark gray",
+    "charcoal",
+    "black",
+    "silver gray",
+    "warm gray",
+    "cool gray",
+    "taupe",
+    "mushroom brown",
+    "light brown",
+    "brown",
+    "dark brown",
+    "chocolate",
+    "coffee",
+    "caramel",
+    "rust",
+    "terracotta",
+    "brick red",
+    "red",
+    "dark red",
+    "wine red",
+    "burgundy",
+    "cherry red",
+    "coral",
+    "salmon",
+    "peach",
+    "apricot",
+    "orange",
+    "burnt orange",
+    "amber",
+    "mustard",
+    "yellow",
+    "pale yellow",
+    "lemon",
+    "gold",
+    "olive",
+    "olive green",
+    "moss green",
+    "forest green",
+    "dark green",
+    "green",
+    "bright green",
+    "lime",
+    "mint",
+    "sage",
+    "sea green",
+    "teal",
+    "dark teal",
+    "turquoise",
+    "aqua",
+    "cyan",
+    "sky blue",
+    "light blue",
+    "baby blue",
+    "powder blue",
+    "blue",
+    "royal blue",
+    "cobalt blue",
+    "navy",
+    "dark navy",
+    "denim blue",
+    "steel blue",
+    "slate blue",
+    "periwinkle",
+    "lavender",
+    "lilac",
+    "violet",
+    "purple",
+    "dark purple",
+    "plum",
+    "grape purple",
+    "magenta",
+    "fuchsia",
+    "hot pink",
+    "pink",
+    "light pink",
+    "blush pink",
+    "dusty rose",
+    "rose pink",
+    "mauve",
+    "berry",
+    "pale green",
+    "pale blue",
+    "pale pink",
+    "pale lavender",
+    "stone gray",
+    "oatmeal",
+    "linen white",
+    "smoke gray",
+    "ash gray",
+    "pewter"
+   ]
+  },
+  {
+   "name": "fabric_material",
+   "values": [
+    "cotton poplin",
+    "crepe",
+    "cotton muslin",
+    "cotton flannel",
+    "wool flannel",
+    "fleece"
+   ]
+  },
+  {
+   "name": "fabric_thickness",
+   "by": "fabric_material",
+   "note": "The thicknesses that fit each material.",
+   "values": {
+    "cotton poplin": [
+     "thin"
+    ],
+    "crepe": [
+     "thin"
+    ],
+    "cotton muslin": [
+     "thin"
+    ],
+    "cotton flannel": [
+     "medium"
+    ],
+    "wool flannel": [
+     "medium"
+    ],
+    "fleece": [
+     "medium",
+     "heavy"
+    ]
+   }
+  },
+  {
+   "name": "fabric_condition",
+   "values": [
+    "brand new and crisp",
+    "clean and soft, washed many times",
+    "old and worn, evenly faded and pilled all over"
+   ]
+  },
+  {
+   "name": "floor",
+   "by": "place",
+   "note": "The floor (or ground) that fits each place. Used as \"The table stands on {floor}.\"",
+   "values": {
+    "a robotics laboratory with equipment, cables and shelves in the background": [
+     "a light gray epoxy floor",
+     "a gray polished concrete floor"
+    ],
+    "a university robotics lab with a whiteboard and desks behind": [
+     "a gray vinyl tile floor",
+     "a light gray linoleum floor"
+    ],
+    "a small research lab with monitors and a rack of electronics behind": [
+     "a gray carpet tile floor",
+     "a light gray vinyl floor"
+    ],
+    "a bright lab with white walls and a row of computers behind": [
+     "a white epoxy floor",
+     "a light gray vinyl floor"
+    ],
+    "a lab with black curtains hanging behind the table": [
+     "a dark gray concrete floor",
+     "a black rubber floor"
+    ],
+    "a lab with a plain gray wall and a fire extinguisher in the corner": [
+     "a gray polished concrete floor",
+     "a gray vinyl tile floor"
+    ],
+    "a lab with glass partitions and offices behind": [
+     "a gray carpet tile floor",
+     "a light gray polished concrete floor"
+    ],
+    "a lab with metal shelves full of boxes and parts behind": [
+     "a gray polished concrete floor",
+     "a light gray epoxy floor"
+    ],
+    "a lab with a large window and a parking lot outside": [
+     "a light gray linoleum floor",
+     "a beige vinyl tile floor"
+    ],
+    "a lab with a second robot arm standing idle in the background": [
+     "a light gray epoxy floor",
+     "a gray polished concrete floor"
+    ],
+    "a lab with a 3D printer and a soldering station behind": [
+     "a gray vinyl tile floor",
+     "a light gray epoxy floor"
+    ],
+    "a lab with a big screen showing a plot on the back wall": [
+     "a dark gray carpet tile floor",
+     "a gray vinyl tile floor"
+    ],
+    "a lab with cardboard boxes stacked against the wall": [
+     "a gray polished concrete floor",
+     "a beige vinyl tile floor"
+    ],
+    "a lab with a workbench and hand tools behind": [
+     "a gray polished concrete floor",
+     "a gray epoxy floor"
+    ],
+    "a lab with a blue safety fence around the work area": [
+     "a gray epoxy floor",
+     "a light gray polished concrete floor"
+    ],
+    "a lab with a poster wall and a coffee machine behind": [
+     "a gray carpet tile floor",
+     "a beige linoleum floor"
+    ],
+    "a lab with a concrete floor and yellow floor markings": [
+     "a gray concrete floor with yellow floor markings"
+    ],
+    "a lab with white acoustic panels on the wall": [
+     "a light gray vinyl floor",
+     "a gray carpet tile floor"
+    ],
+    "a lab with an open door to a corridor behind": [
+     "a light gray linoleum floor",
+     "a gray vinyl tile floor"
+    ],
+    "a lab with a camera tripod and lights standing behind": [
+     "a light gray polished concrete floor",
+     "a gray vinyl floor"
+    ],
+    "a lab with a drone on a shelf and cables on the wall": [
+     "a gray vinyl tile floor",
+     "a gray polished concrete floor"
+    ],
+    "a lab with a fume hood and chemical bottles behind": [
+     "a light gray epoxy floor",
+     "a beige vinyl tile floor"
+    ],
+    "a lab with server racks with blinking lights behind": [
+     "a white raised-panel floor",
+     "a gray vinyl tile floor"
+    ],
+    "a lab with a treadmill and motion capture cameras behind": [
+     "a black rubber sports floor",
+     "a gray carpet tile floor"
+    ],
+    "a lab with a ping-pong table pushed against the wall": [
+     "a gray polished concrete floor",
+     "a light wood plank floor"
+    ],
+    "a lab with a mobile robot parked in the corner": [
+     "a light gray epoxy floor",
+     "a gray polished concrete floor"
+    ],
+    "a lab with a tool cabinet and a vise behind": [
+     "a gray polished concrete floor",
+     "a gray epoxy floor"
+    ],
+    "a lab with a dark green chalkboard behind": [
+     "a beige linoleum floor",
+     "a gray vinyl tile floor"
+    ],
+    "a lab with plants on the window sill": [
+     "a light wood plank floor",
+     "a light gray linoleum floor"
+    ],
+    "a lab with a cluttered desk and a chair behind": [
+     "a gray carpet tile floor",
+     "a beige vinyl tile floor"
+    ],
+    "a clean room with smooth white panels and blue light": [
+     "a white epoxy floor"
+    ],
+    "a chemistry lab with glassware on the shelves behind": [
+     "a light gray epoxy floor",
+     "a beige vinyl tile floor"
+    ],
+    "a biology lab with microscopes and a fridge behind": [
+     "a light gray vinyl floor",
+     "a white vinyl tile floor"
+    ],
+    "a workshop with tools hanging on a pegboard": [
+     "a gray concrete floor",
+     "a worn wood plank floor"
+    ],
+    "a wood workshop with sawdust and planks behind": [
+     "a concrete floor with sawdust",
+     "a worn wood plank floor"
+    ],
+    "a metal workshop with a lathe and a drill press behind": [
+     "a dark gray concrete floor",
+     "an oil-stained concrete floor"
+    ],
+    "a car repair garage with a lifted car in the background": [
+     "an oil-stained concrete floor",
+     "a gray epoxy floor"
+    ],
+    "a garage with a rolling door and shelves of boxes": [
+     "a gray concrete floor",
+     "a gray epoxy floor"
+    ],
+    "a bike repair shop with wheels hanging on the wall": [
+     "a gray concrete floor",
+     "a worn wood plank floor"
+    ],
+    "a makerspace with 3D printers and colorful filament spools": [
+     "a gray polished concrete floor",
+     "a light wood plank floor"
+    ],
+    "an electronics repair shop with circuit boards on shelves": [
+     "a gray vinyl tile floor",
+     "a beige linoleum floor"
+    ],
+    "a sewing workshop with fabric rolls behind": [
+     "a light wood plank floor",
+     "a beige linoleum floor"
+    ],
+    "a pottery studio with shelves of clay pots": [
+     "a clay-stained concrete floor",
+     "a worn wood plank floor"
+    ],
+    "a subway workshop with train parts behind": [
+     "a dark gray concrete floor",
+     "an oil-stained concrete floor"
+    ],
+    "a factory hall with machines and safety railings far behind": [
+     "a gray concrete floor with yellow safety lines",
+     "a green epoxy floor"
+    ],
+    "a factory with conveyor belts in the background": [
+     "a gray epoxy floor",
+     "a gray concrete floor"
+    ],
+    "a packaging plant with stacks of cardboard boxes": [
+     "a gray concrete floor",
+     "a light gray epoxy floor"
+    ],
+    "a clean assembly line with white walls and bright light": [
+     "a light gray epoxy floor",
+     "a white epoxy floor"
+    ],
+    "a textile factory with rolls of cloth behind": [
+     "a gray concrete floor",
+     "a worn wood plank floor"
+    ],
+    "a warehouse with tall pallet racks far behind": [
+     "a gray concrete floor",
+     "a polished concrete floor with yellow lines"
+    ],
+    "a warehouse with a forklift parked in the background": [
+     "a gray concrete floor with tire marks",
+     "a gray concrete floor"
+    ],
+    "a logistics center with parcels on shelves": [
+     "a gray polished concrete floor",
+     "a gray concrete floor"
+    ],
+    "a cold storage room with steel walls": [
+     "a gray non-slip resin floor",
+     "a steel plate floor"
+    ],
+    "a loading dock with an open roller door": [
+     "a rough gray concrete floor",
+     "a concrete floor with yellow lines"
+    ],
+    "an aircraft hangar with a plane far behind": [
+     "a light gray epoxy floor",
+     "a gray polished concrete floor"
+    ],
+    "a shipyard hall with steel plates and cranes": [
+     "a dark gray concrete floor",
+     "a rough concrete floor"
+    ],
+    "an office with desks, monitors and chairs behind": [
+     "a gray carpet tile floor",
+     "a blue-gray carpet floor"
+    ],
+    "a bright office room with a plain white wall": [
+     "a light gray carpet floor",
+     "a light wood laminate floor"
+    ],
+    "an open-plan office with glass meeting rooms behind": [
+     "a gray carpet tile floor",
+     "a dark gray carpet floor"
+    ],
+    "a meeting room with a long table and a screen behind": [
+     "a dark gray carpet floor",
+     "a light wood laminate floor"
+    ],
+    "a reception area with a sofa and plants": [
+     "a white marble tile floor",
+     "a light wood plank floor"
+    ],
+    "an office corner with a filing cabinet and a printer": [
+     "a gray carpet tile floor",
+     "a beige carpet floor"
+    ],
+    "a coworking space with brick walls and hanging lamps": [
+     "a polished concrete floor",
+     "a worn wood plank floor"
+    ],
+    "a call center with rows of desks behind": [
+     "a blue-gray carpet floor",
+     "a gray carpet tile floor"
+    ],
+    "a small startup office with sticky notes on the wall": [
+     "a light wood laminate floor",
+     "a gray carpet tile floor"
+    ],
+    "an office kitchen with a fridge and cabinets behind": [
+     "a gray vinyl tile floor",
+     "a light wood laminate floor"
+    ],
+    "a conference room with flags and a podium": [
+     "a dark blue carpet floor",
+     "a dark wood parquet floor"
+    ],
+    "a control room with many screens on the wall": [
+     "a dark gray carpet floor",
+     "a gray raised-panel floor"
+    ],
+    "a security office with monitors behind": [
+     "a gray vinyl tile floor",
+     "a dark gray carpet floor"
+    ],
+    "a server room with racks and blue lights": [
+     "a white raised-panel floor",
+     "a gray raised-panel floor"
+    ],
+    "a data center corridor with cold air ducts": [
+     "a white raised-panel floor",
+     "a light gray vinyl floor"
+    ],
+    "a print shop with large printers and paper stacks": [
+     "a gray vinyl tile floor",
+     "a gray concrete floor"
+    ],
+    "a classroom with a chalkboard and rows of chairs": [
+     "a beige linoleum floor",
+     "a gray vinyl tile floor"
+    ],
+    "a lecture hall with tiered seats behind": [
+     "a dark gray carpet floor",
+     "a wood parquet floor"
+    ],
+    "a school science room with posters and sinks": [
+     "a beige vinyl tile floor",
+     "a gray linoleum floor"
+    ],
+    "a library with tall bookshelves behind": [
+     "a dark green carpet floor",
+     "a wood parquet floor"
+    ],
+    "a study room with wooden desks and lamps": [
+     "a wood parquet floor",
+     "a beige carpet floor"
+    ],
+    "a computer classroom with monitors on every desk": [
+     "a gray carpet tile floor",
+     "a blue linoleum floor"
+    ],
+    "a kindergarten room with small chairs and drawings on the wall": [
+     "a colorful foam mat floor",
+     "a light wood laminate floor"
+    ],
+    "a university hallway with lockers behind": [
+     "a speckled terrazzo floor",
+     "a beige linoleum floor"
+    ],
+    "a student lounge with bean bags and a vending machine": [
+     "a gray carpet tile floor",
+     "a light wood laminate floor"
+    ],
+    "an art classroom with easels and paint stains": [
+     "a paint-stained concrete floor",
+     "a gray linoleum floor"
+    ],
+    "a science fair hall with poster boards": [
+     "a wood gym floor",
+     "a gray carpet floor"
+    ],
+    "a home kitchen with tiled walls and cabinets": [
+     "a beige ceramic tile floor",
+     "a light wood plank floor"
+    ],
+    "a modern kitchen with white cabinets and a window": [
+     "a light gray ceramic tile floor",
+     "a light oak plank floor"
+    ],
+    "a living room with a sofa and a bookshelf behind": [
+     "a light oak plank floor",
+     "a beige carpet floor"
+    ],
+    "a living room with a TV and a plant in the corner": [
+     "a dark wood plank floor",
+     "a gray carpet floor"
+    ],
+    "a dining room with a wooden cabinet and framed pictures": [
+     "a dark wood parquet floor",
+     "a light oak plank floor"
+    ],
+    "a bedroom with a bed and a wardrobe behind": [
+     "a beige carpet floor",
+     "a light wood laminate floor"
+    ],
+    "a home office with a desk, a lamp and books": [
+     "a light oak plank floor",
+     "a gray carpet floor"
+    ],
+    "a laundry room with a washing machine and shelves": [
+     "a white ceramic tile floor",
+     "a gray vinyl floor"
+    ],
+    "a hallway of a house with coats hanging on hooks": [
+     "a light wood plank floor",
+     "a beige ceramic tile floor"
+    ],
+    "a small apartment with a balcony door behind": [
+     "a light wood laminate floor",
+     "a gray vinyl plank floor"
+    ],
+    "a loft with exposed brick walls and large windows": [
+     "a worn wood plank floor",
+     "a polished concrete floor"
+    ],
+    "a basement with pipes on the ceiling and a concrete wall": [
+     "a bare gray concrete floor",
+     "a painted gray concrete floor"
+    ],
+    "a hospital room with a bed and medical equipment behind": [
+     "a light blue vinyl floor",
+     "a beige linoleum floor"
+    ],
+    "a clinic with white cabinets and a sink": [
+     "a light gray vinyl floor",
+     "a white vinyl tile floor"
+    ],
+    "a nursing home lounge with armchairs": [
+     "a beige carpet floor",
+     "a light wood laminate floor"
+    ],
+    "a pharmacy with shelves of boxes behind": [
+     "a white ceramic tile floor",
+     "a light gray vinyl floor"
+    ],
+    "a dental office with a chair and lamp behind": [
+     "a light gray vinyl floor",
+     "a light blue vinyl floor"
+    ],
+    "a physiotherapy room with exercise balls and mats": [
+     "a light wood laminate floor",
+     "a blue rubber floor"
+    ],
+    "a veterinary clinic with cages and a scale": [
+     "a gray non-slip vinyl floor",
+     "a beige ceramic tile floor"
+    ],
+    "a rehabilitation center with parallel bars and mats": [
+     "a light wood laminate floor",
+     "a gray rubber floor"
+    ],
+    "a hospital corridor with a gurney and handrails": [
+     "a light green linoleum floor",
+     "a beige vinyl floor"
+    ],
+    "a medical storage room with boxes of supplies on shelves": [
+     "a gray vinyl tile floor",
+     "a light gray linoleum floor"
+    ],
+    "a small grocery store with shelves of goods": [
+     "a beige ceramic tile floor",
+     "a light gray vinyl tile floor"
+    ],
+    "a clothing store with racks of clothes behind": [
+     "a light wood plank floor",
+     "a polished concrete floor"
+    ],
+    "a department store with folded clothes on tables": [
+     "a white marble tile floor",
+     "a beige ceramic tile floor"
+    ],
+    "a hardware store aisle with tools on hooks": [
+     "a gray polished concrete floor",
+     "a gray vinyl tile floor"
+    ],
+    "a furniture showroom with sofas and lamps": [
+     "a light beige polished stone floor",
+     "a light oak plank floor"
+    ],
+    "an electronics store with TVs on the wall": [
+     "a gray carpet tile floor",
+     "a white ceramic tile floor"
+    ],
+    "a flower shop with buckets of flowers": [
+     "a wet gray concrete floor",
+     "a terracotta tile floor"
+    ],
+    "a hotel room with a bed and curtains behind": [
+     "a beige carpet floor",
+     "a dark brown carpet floor"
+    ],
+    "a hotel laundry with carts of folded linen": [
+     "a white ceramic tile floor",
+     "a gray vinyl floor"
+    ],
+    "a restaurant kitchen with steel counters and pots": [
+     "a red quarry tile floor",
+     "a gray non-slip tile floor"
+    ],
+    "a cafe with a counter, cups and a chalk menu behind": [
+     "a worn wood plank floor",
+     "a dark wood plank floor"
+    ],
+    "a bakery with racks of bread behind": [
+     "a beige ceramic tile floor",
+     "a terracotta tile floor"
+    ],
+    "a cafeteria with tables and chairs far behind": [
+     "a speckled terrazzo floor",
+     "a beige vinyl tile floor"
+    ],
+    "a bar with bottles on shelves behind": [
+     "a dark wood plank floor",
+     "a black tile floor"
+    ],
+    "a photo studio with a white seamless backdrop": [
+     "a white seamless studio floor",
+     "a light gray concrete floor"
+    ],
+    "a photo studio with a gray backdrop and softboxes": [
+     "a gray concrete floor",
+     "a gray seamless studio floor"
+    ],
+    "a TV studio with cameras and lights behind": [
+     "a glossy black studio floor",
+     "a gray studio floor"
+    ],
+    "a recording studio with foam panels on the wall": [
+     "a dark wood plank floor",
+     "a dark gray carpet floor"
+    ],
+    "a theater backstage with ropes and props": [
+     "a black painted wood stage floor",
+     "a worn wood plank floor"
+    ],
+    "a museum hall with glass cases behind": [
+     "a polished gray stone floor",
+     "a wood parquet floor"
+    ],
+    "an art gallery with white walls and paintings": [
+     "a polished concrete floor",
+     "a light wood plank floor"
+    ],
+    "a science museum with an exhibit behind": [
+     "a dark gray carpet floor",
+     "a polished concrete floor"
+    ],
+    "an exhibition booth with banners and a curtain behind": [
+     "a gray exhibition carpet floor",
+     "a blue exhibition carpet floor"
+    ],
+    "a trade show hall with many booths far behind": [
+     "a gray exhibition carpet floor",
+     "a polished concrete floor"
+    ],
+    "a robotics competition arena with a crowd far behind": [
+     "a gray foam tile floor",
+     "a blue arena carpet floor"
+    ],
+    "a gym with weights and mirrors behind": [
+     "a black rubber gym floor",
+     "a wood gym floor"
+    ],
+    "a yoga studio with wooden floors and mats": [
+     "a light wood plank floor"
+    ],
+    "a locker room with metal lockers and benches": [
+     "a gray ceramic tile floor",
+     "a blue rubber floor"
+    ],
+    "a sports hall with a basketball hoop far behind": [
+     "a wood sports floor with painted lines",
+     "a blue sports floor"
+    ],
+    "a post office with parcels and counters": [
+     "a gray vinyl tile floor",
+     "a beige ceramic tile floor"
+    ],
+    "a bank branch with counters and glass": [
+     "a polished beige marble floor",
+     "a gray carpet floor"
+    ],
+    "a community center with folding tables and chairs": [
+     "a beige linoleum floor",
+     "a wood parquet floor"
+    ],
+    "a shipping container converted into a workspace": [
+     "a plywood floor",
+     "a gray vinyl floor"
+    ],
+    "a greenhouse with plants and glass walls": [
+     "a gravel floor",
+     "a concrete paver floor"
+    ],
+    "a modern hallway with glass walls and plants": [
+     "a polished gray stone floor",
+     "a light gray ceramic tile floor"
+    ],
+    "an elevator lobby with steel doors behind": [
+     "a polished gray marble floor",
+     "a beige ceramic tile floor"
+    ],
+    "a laundromat with rows of washing machines": [
+     "a white ceramic tile floor",
+     "a gray vinyl tile floor"
+    ],
+    "a mailroom with sorting shelves": [
+     "a gray vinyl tile floor",
+     "a gray carpet tile floor"
+    ],
+    "a storage room with metal shelves and plastic bins": [
+     "a gray concrete floor",
+     "a gray vinyl tile floor"
+    ],
+    "a dry cleaner with clothes on a rail": [
+     "a beige vinyl tile floor",
+     "a gray linoleum floor"
+    ],
+    "a tailor shop with a sewing machine and a mannequin": [
+     "a wood parquet floor",
+     "a beige carpet floor"
+    ],
+    "a copy room with a photocopier and paper boxes": [
+     "a gray carpet tile floor",
+     "a gray vinyl tile floor"
+    ],
+    "a service center with devices on repair shelves": [
+     "a gray vinyl tile floor",
+     "a light gray epoxy floor"
+    ],
+    "a bicycle storage room with bikes on racks": [
+     "a gray concrete floor",
+     "a painted gray concrete floor"
+    ],
+    "a janitor room with a sink and cleaning carts": [
+     "a gray ceramic tile floor",
+     "a wet gray concrete floor"
+    ],
+    "a paved university courtyard": [
+     "gray paving stones",
+     "red brick pavers"
+    ],
+    "a covered patio with a brick wall behind": [
+     "a gray concrete patio floor",
+     "terracotta patio tiles"
+    ],
+    "a rooftop terrace with a city skyline far behind": [
+     "gray concrete roof pavers",
+     "a wooden deck"
+    ],
+    "a backyard with a lawn and a wooden fence": [
+     "short green grass",
+     "a wooden deck"
+    ],
+    "a garden with flower beds and bushes": [
+     "short green grass",
+     "a gravel path"
+    ],
+    "a park with trees and a path behind": [
+     "short green grass",
+     "a gray gravel path"
+    ],
+    "a street market with stalls and awnings behind": [
+     "gray cobblestones",
+     "gray asphalt"
+    ],
+    "a sidewalk cafe terrace with chairs and umbrellas": [
+     "gray paving stones",
+     "gray cobblestones"
+    ],
+    "a farm yard with a tractor far behind": [
+     "packed brown dirt",
+     "rough gray gravel"
+    ],
+    "a vegetable field with rows of plants": [
+     "dark brown soil",
+     "packed brown dirt"
+    ],
+    "an orchard with fruit trees": [
+     "green grass with fallen leaves",
+     "short green grass"
+    ],
+    "a construction site with scaffolding far behind": [
+     "packed gray gravel",
+     "packed brown dirt"
+    ],
+    "a container yard with stacked shipping containers": [
+     "gray asphalt",
+     "a rough gray concrete yard floor"
+    ],
+    "a harbor quay with boats in the water": [
+     "a gray concrete quay",
+     "weathered gray stone pavers"
+    ],
+    "a beach boardwalk with the sea behind": [
+     "weathered wooden boardwalk planks"
+    ],
+    "a campsite with tents far behind": [
+     "short green grass",
+     "packed brown dirt"
+    ],
+    "a school playground with a climbing frame": [
+     "a red rubber playground floor",
+     "gray asphalt"
+    ],
+    "a sports field with goals far behind": [
+     "short green grass",
+     "green artificial turf"
+    ],
+    "an outdoor research station with instruments on a mast": [
+     "rough gravel",
+     "dry grass"
+    ],
+    "a solar panel field": [
+     "dry grass",
+     "gray gravel"
+    ],
+    "a village square with old houses": [
+     "gray cobblestones",
+     "worn stone pavers"
+    ],
+    "a mountain hut terrace with mountains behind": [
+     "a weathered wooden deck",
+     "rough gray stone slabs"
+    ],
+    "a lakeside dock with trees across the water": [
+     "weathered gray wooden dock planks"
+    ],
+    "a desert test site with sand and rocks": [
+     "dry sand with small rocks",
+     "cracked dry earth"
+    ],
+    "a snowy yard with snow on the ground": [
+     "packed white snow"
+    ],
+    "a plant nursery with rows of potted plants": [
+     "gray gravel",
+     "a black weed-mat floor"
+    ],
+    "a food stall under a canopy": [
+     "gray asphalt",
+     "gray paving stones"
+    ],
+    "an industrial yard with pipes and tanks": [
+     "a rough gray concrete yard floor",
+     "gray gravel"
+    ],
+    "an apartment balcony with potted plants": [
+     "gray balcony tiles",
+     "a wooden balcony deck"
+    ],
+    "a driveway in front of a house with a garage door": [
+     "a gray concrete driveway",
+     "gray asphalt"
+    ]
+   }
+  }
+ ],
+ "sentence": "The scene is in {place}. The table stands on {floor}. The table top is {table}. The lighting is {lighting}. {robot} The fabric is a single-layer rectangular piece of {fabric_thickness} {fabric_color} {fabric_material}, {fabric_condition}, plain, one solid color. In the right half, the area beside the table shows the same floor as the left half, in the same light.",
+ "cosmos": {
+  "prompt": "A Franka robot arm folds a single piece of fabric on a table, realistic video. The fabric has the same color and texture on both sides. The left camera is fixed and the right camera moves with the gripper. Split screen: left, the room camera; right, the camera on the robot gripper.",
+  "sentence": "The fabric is a single-layer rectangular piece of {fabric_thickness} {fabric_color} {fabric_material}, {fabric_condition}, plain, one solid color. The table stands on {floor}. In the right view, this floor is visible beyond the table edges, in the same light as in the left view."
+ },
+ "card": "{place} | table: {table} | light: {lighting} | fabric: {fabric_thickness} {fabric_color} {fabric_material}, {fabric_condition} | {robot} | floor: {floor}"
+}

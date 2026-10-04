@@ -30,8 +30,9 @@ sentence: filled from the axes and put after the first sentence of the prompt; "
 review page, with {<axis name>}). Axis "place" has "places" (place type -> list, every type of PLACE_TYPES), axis
 "lighting" has "indoor" ("{source}, {color}, {level}" with the lists indoor_sources, indoor_colors, indoor_levels),
 "strong" ("{color}" with strong_colors) and "outdoor" (a list). Every other axis has "values": a list, or, with
-"by": "<an earlier axis>", one list per value of that axis (v3: the thicknesses that fit each material). "note" is
-free text. The draw order is lighting first, then the other axes in order (as in v1 and v2).
+"by": "<an earlier axis>", one list per value of that axis (v3: the thicknesses that fit each material; v6: the
+floors that fit each place, "by": "place"). "note" is free text. The draw order is lighting first, then the other
+axes in order (as in v1 and v2).
 """
 
 import glob
@@ -210,9 +211,10 @@ def _check(s: Spec) -> None:
             if not isinstance(values, list) or not values:
                 raise ValueError(f"axis {f} needs a list of values")
             continue
-        if by not in s.fields[:i] or not isinstance(s.axes[by].get("values"), list):
-            raise ValueError(f"axis {f}: by must name an earlier axis with a list of values")
-        if not isinstance(values, dict) or set(values) != set(s.axes[by]["values"]) or not all(values.values()):
+        keys = [x for xs in places.values() for x in xs] if by == "place" else s.axes.get(by, {}).get("values")
+        if by not in s.fields[:i] or not isinstance(keys, list):
+            raise ValueError(f"axis {f}: by must name the place axis or an earlier axis with a list of values")
+        if not isinstance(values, dict) or set(values) != set(keys) or not all(values.values()):
             raise ValueError(f"axis {f} needs a list of values for each value of {by}")
     names = {f: f for f in s.fields} | {"place_type": "place_type"}
     for where, text in (("sentence", s.template), ("cosmos.sentence", s.cosmos.get("sentence", "")),
