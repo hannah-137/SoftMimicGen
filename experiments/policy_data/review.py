@@ -6,9 +6,10 @@ It starts a small web server (Python standard library only) and prints the addre
 requests with the token are served, and only .mp4 and .png files inside the dataset folder. The token is kept in
 <dataset>/.review_token, so the address stays the same when review.py starts again.
 
-Videos tab: every Cosmos video of the group, with the simulator video (it plays together with the Cosmos video) and
-the reference image side by side, the variation of the image (the line "card" of its spec version, v2: place,
-table, lighting, towel, robot) and the spec version of the video. Mark each
+Videos tab: every Cosmos video of the group, next to its simulator video (it plays together with the Cosmos
+video), both as large as the window allows (side by side; one above the other in a window that is higher than
+wide). The head of the card has a link that opens the reference image in a new tab, the variation of the image (the
+line "card" of its spec version, v2: place, table, lighting, towel, robot) and the spec version of the video. Mark each
 video Approve (O), Weak (a triangle: usable but weak) or Reject (X). Weak counts as done, like Approve; review.csv
 keeps the word weak, so weak videos can be counted or left out later. With Weak or Reject, tick one or more reasons
 (the list is REASONS in status.py), tick "reference image problem" when the image is the cause (a rejected video is
@@ -491,12 +492,13 @@ select { background: var(--card); color: var(--fg); border: 1px solid var(--line
 .muted { color: var(--muted); }
 #types { padding: 6px 16px; font-size: 12px; }
 main { padding-bottom: 70px; }
-.item { border: 1px solid var(--line); border-radius: 8px; margin: 12px 16px; padding: 10px; background: var(--card); }
+.item { border: 1px solid var(--line); border-radius: 8px; margin: 10px 6px; padding: 8px; background: var(--card); }
 .item.focus { outline: 2px solid var(--accent); }
 .head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
 .head .name { font-weight: 600; }
+.head a { color: var(--accent); }
 .var { font-size: 12px; margin: 4px 0 8px; }
-.media { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.media { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }  /* Videos tab: simulator | Cosmos */
 .media.two { grid-template-columns: 2fr 1fr; }
 .media figure { margin: 0; }
 .media figcaption { font-size: 11px; color: var(--muted); }
@@ -521,6 +523,7 @@ footer { position: fixed; bottom: 0; left: 0; right: 0; z-index: 3; background: 
 #submit:disabled { opacity: .5; cursor: default; }
 .err { color: var(--bad); }
 @media (max-width: 800px) { .media, .media.two { grid-template-columns: 1fr; } }
+@media (orientation: portrait) { .media { grid-template-columns: 1fr; } }  /* higher than wide: larger when stacked */
 </style>
 </head>
 <body>
@@ -672,7 +675,11 @@ function headOf(it) {
 
 function reviewCard(it, i) {
   const card = el("div", { class: "item", id: "item" + i });
-  card.append(headOf(it));
+  const head = headOf(it);
+  if (MODE === "videos") {  // the reference image is a link, so the two videos get the whole width
+    head.append(el("a", { href: fileUrl(it.files.ref), target: "_blank", rel: "noopener", text: "reference image" }));
+  }
+  card.append(head);
   if (it.variation) card.append(el("div", { class: "var muted", text: it.variation }));
   const media = el("div", { class: "media" + (MODE === "sim" ? " two" : "") });
   const sim = el("video", { "data-src": fileUrl(it.files.sim), preload: "none", muted: "", playsinline: "",
@@ -693,8 +700,10 @@ function reviewCard(it, i) {
     cos.addEventListener("timeupdate", sync);
     media.append(el("figure", {}, cos, el("figcaption", { text: "Cosmos" })));
   }
-  const img = el("img", { "data-src": fileUrl(it.files.ref), alt: "" });
-  media.append(el("figure", {}, img, el("figcaption", { text: MODE === "videos" ? "reference image" : "frame 0" })));
+  if (MODE === "sim") {
+    const img = el("img", { "data-src": fileUrl(it.files.ref), alt: "" });
+    media.append(el("figure", {}, img, el("figcaption", { text: "frame 0" })));
+  }
   card.append(media);
 
   const c = el("div", { class: "controls" });
