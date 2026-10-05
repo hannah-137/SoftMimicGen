@@ -174,7 +174,7 @@ work again every time: run them once per step. (`--replace` without `--reason` o
 7. Review the videos on the review page: the simulator video and the Cosmos video play together, next to the
    reference image. Mark each video Approve (O), Weak (a triangle: usable but weak) or Reject (X); the keys are A,
    W and R. Weak counts as done, like Approve, and review.csv keeps the word weak for later analysis. With Weak or
-   Reject, tick one or more reasons (towel look, towel shape, doubled towel, extra object, robot, background,
+   Reject, tick one or more reasons (towel look, towel shape, doubled towel, towel, extra object, robot, background,
    wrist view background, lighting, table, image quality, room and wrist views do not match, reference image problem) or
    write the reason in the line. A weak or rejected video without a reason is saved but counts as not reviewed until it has one. With
    Reject, tick "reference image problem" when the image is the cause: the video is then made again with a new
