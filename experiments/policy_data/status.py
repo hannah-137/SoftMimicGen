@@ -96,7 +96,7 @@ REASONS = [
     ("towel_look", "Towel color, texture or pattern changed"),
     ("towel_shape", "Towel shape differs from the simulator"),
     ("towel_doubled", "Towel looks doubled, or more than one towel"),
-    ("towel", "Towel problem"),
+    ("towel_wrinkle", "Towel wrinkle problem"),
     ("extra_object", "Extra object visible (hand, cable, gripper, text or logo, ...)"),
     ("robot", "Robot problem (ghosting, doubling, melting, pose or motion differs from the simulator, ...)"),
     ("background", "Background problem"),
