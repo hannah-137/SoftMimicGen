@@ -87,7 +87,7 @@ to `<run_dir>/cosmos/<checkpoint name>_<date>_<time>/000-049/`.
 
 The spec is in `SPEC.md`. Run the commands from the repository root in the SoftMimicGen environment.
 `make_references.py`, `checks/check_references.py`, `run_cosmos.py` (in a dataset folder) and `status.py` can run
-again: finished work is skipped. `make_demos.sh`, `make_dataset.py --take` and `make_dataset.py --replace` do the
+again: finished work is skipped. `make_demos.sh` and `make_dataset.py` (`--take`, `--replace`, `--add`) do the
 work again every time: run them once per step. (`--replace` without `--reason` only finishes a replace that
 `status.py` lists as stopped halfway.)
 `status.py` prints the state and the next commands.
@@ -110,6 +110,11 @@ work again every time: run them once per step. (`--replace` without `--reason` o
    hdf5 copy needs about 350 MB per demo (750 demos: about 260 GB); the script stops first when the disk has less.
 
        python experiments/policy_data/make_dataset.py --take <seed 1 run>:50 <seed 2 run>:350 <seed 3 run>:350
+
+   More demos later: `--add` puts the next unused demos of a run after the last number. The folder keeps its
+   name. Then do steps 4 to 7 for the new numbers.
+
+       python experiments/policy_data/make_dataset.py <dataset> --add <run>:<N> [<run>:<N> ...]
 
 4. Look at the simulator videos on the review page (see step 7), tab Simulator. After you reject a demo that looks
    wrong, run `status.py`: it prints the command that puts another demo at its number:
@@ -135,8 +140,10 @@ work again every time: run them once per step. (`--replace` without `--reason` o
    use `--redo --demos <numbers> --reason "<why>"`. It skips demos that have a Cosmos video: reject those videos on
    the review page with "reference image problem".
 
-6. Cosmos videos, about 12 minutes per video on 2 GPUs. The script takes only the demos that are ready (state
-   `needs_video`: the image passed its check, no video yet) and skips the rest, so the same command can run again.
+6. Cosmos videos, about 12 minutes per video on 2 GPUs (about 20 with the depth control of spec v7; about 39
+   with the color guide of v8, which makes each video in two passes, see `SPEC.md`). The script takes only the
+   demos that are ready (state `needs_video`: the image passed its check, no video yet) and skips the rest, so
+   the same command can run again.
    With 4 GPUs, run two commands at the same time: each takes other demos (`--max` splits the batch).
 
        python experiments/policy_data/run_cosmos.py <dataset> --demos 0-49 --max 25 --gpus 0,1 --cp 2 \
@@ -187,7 +194,8 @@ work again every time: run them once per step. (`--replace` without `--reason` o
 ## Dataset folder
 
 `make_dataset.py --take` copies the demos into one hdf5 and numbers them 0, 1, 2, ... The videos and frame-0 images
-are hard links to the runs (no extra disk space). The runs stay as they are: `--replace` takes spare demos there.
+are hard links to the runs (no extra disk space). The runs stay as they are: `--replace` takes spare demos there,
+and `--add` puts unused demos after the last number.
 
     runs/<task>_n<demos>_seeds<seeds>_<date>_<time>/
       <task>_n<demos>_seeds<seeds>.hdf5   data/demo_N as in a run, plus the attributes source_run, source_demo and
@@ -258,8 +266,8 @@ Nothing in the code names a host, a user or an absolute path.
 - Stop a Cosmos job with Ctrl-C or `kill <pid>`: it stops the framework and keeps the finished videos. Run the same
   command again for the rest. After `kill -9` the framework may go on for a while: `status.py` shows the job as
   running until it ends; the next `run_cosmos.py` then takes over its finished videos.
-- h5py "unable to lock file": another process has the hdf5 open for writing (`make_dataset.py --replace`). Run the
-  command again when it is done.
+- h5py "unable to lock file": another process has the hdf5 open for writing (`make_dataset.py --replace` or
+  `--add`). Run the command again when it is done.
 - The same `--seed` does not give the same hdf5 file: the GPU physics differs slightly between runs.
 - `status.py` lists problems (for example a file in the wrong group folder): fix them by hand, then run it again.
 - "--replace stopped halfway": run `make_dataset.py <dataset> --replace <demo>` (no `--reason`). It finishes the
@@ -296,7 +304,8 @@ Folder names are fixed by the scripts. Do not rename them or add words.
 - `make_references.py`, `variations.py` - reference images with the OpenAI image API; the rules of the variations
   (place type shares, strong light) and the loader of the spec files.
 - `specs/<version>.json` - one file per spec version: the axis lists, the image prompt and model, the Cosmos prompt.
-- `make_dataset.py` - one dataset folder from several runs (`--take`), another demo at a number (`--replace`).
+- `make_dataset.py` - one dataset folder from several runs (`--take`), another demo at a number (`--replace`),
+  more demos after the last number (`--add`).
 - `status.py` - state of a dataset (`dataset.csv`, `videos.csv`) and the next commands; the lock and csv helpers.
 - `review.py` - review page (web server, standard library only): mark videos O, weak or X with reasons, and check
   the simulator demos.
@@ -304,7 +313,8 @@ Folder names are fixed by the scripts. Do not rename them or add words.
 - `checks/check_references.py` - size and layout check of the reference images.
 - `checks/check_towel_stuck.py` - finds demos where the towel still hangs on the gripper at the last frame.
 - `checks/check_towel_in_view.py` - finds demos where the towel touches the image border in any frame.
-- `run_cosmos.py`, `cosmos_launch.py` - Cosmos3 video2video with the edge control video (from spec v7 also a depth control video).
+- `run_cosmos.py`, `cosmos_launch.py` - Cosmos3 video2video with the edge control video (from spec v7 also a
+  depth control video, from v8 also a color guide made from a first pass).
 - `run_queue.py` - reference images and Cosmos videos group by group, with no wait on the GPUs between groups.
 
 ## Needs

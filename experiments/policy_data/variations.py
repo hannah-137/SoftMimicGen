@@ -41,7 +41,7 @@ import os
 import random
 
 SPECS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "specs")
-CONTROLS = ("edge", "depth")  # control videos that run_cosmos.py can give to Cosmos (key cosmos.controls)
+CONTROLS = ("edge", "depth", "color")  # control videos that run_cosmos.py can give to Cosmos (key cosmos.controls)
 OUTDOOR_SHARE = 0.2
 BLOCK = 50  # the place type shares are exact in every group of BLOCK demos
 STRONG_PER_BLOCK = 2  # indoor demos with strong colored light in every group of BLOCK demos (4%)

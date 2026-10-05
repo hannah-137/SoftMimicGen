@@ -6,9 +6,15 @@
 Input: <run_dir>/demos/000-049/demo_NNN/demo_NNN_geoedge.mp4 (control video) and the reference images in
 <run_dir>/refs/000-049/ (demo_NNN_<tag>.png or demo_NNN.png, checked by checks/check_references.py; 50 demos per
 folder, see layout.py). One video per reference image. Cosmos keeps the reference image as frame 0 and follows the
-edge video. A spec version can add the depth control (key cosmos.controls of specs/<version>.json, from v7): the
-script then makes a depth video from the raw depth in the demo hdf5 of <run_dir> (1 / depth as gray, near is white)
-and gives it to Cosmos next to the edge video, with the same weight.
+edge video. A spec version can add controls (key cosmos.controls of specs/<version>.json). All controls have the
+same weight.
+  depth (from v7): a depth video from the raw depth in the demo hdf5 of <run_dir> (1 / depth as gray, near is white).
+  color (from v8): a color guide. Each video is then made in two passes, one video after the other. Pass 1 uses the
+      edge video only. The guide is the pass-1 video with the towel painted in one color: the color that the towel
+      has in the reference image (the towel pixels come from the raw instance ids in the demo hdf5). Pass 2 gets the
+      guide as the Cosmos blur control, next to the other controls of the version, and makes the final video. The
+      framework starts twice per video (about 1 minute each time). The video goes into its group folder when its
+      pass 2 is done, so the review can start while the job runs.
 
 In a dataset folder (make_dataset.py) the script chooses the demos itself: only the numbers that status.py shows as
 needs_video (the reference image passed its check and is the file that was checked, there is no video yet, no
@@ -26,8 +32,8 @@ Output: <run_dir>/cosmos/<checkpoint folder name>_<YYYYMMDD>_<HHMM>/ (with _2, _
 per reference, 000-049/<name>.mp4 (the video) and 000-049/<name>.json (the settings the framework used, plus
 policy_data: source demo, reference image name and sha1, seed, spec version), and run_config.json, run.log,
 debug.log and benchmark.json at the top. A video goes into its group folder only when it has all 81 frames.
-Temporary files (reference videos, depth control videos, specs, framework folders) are removed after a successful
-run; after a failure everything stays for a look.
+Temporary files (reference videos, control videos, pass-1 videos, specs, framework folders) are removed after a
+successful run; after a failure everything stays for a look.
 Stop a job with Ctrl-C (or kill <pid>): the script stops the framework, keeps the finished videos and ends. The
 same command then makes the rest. When a job ended without that (for example kill -9), the next run_cosmos.py on
 the dataset takes over its finished videos, if the reference image and the demo are still the same.
@@ -72,6 +78,9 @@ import status  # noqa: E402
 import variations  # noqa: E402
 
 N_FRAMES = 81  # frames of every video (spec num_frames)
+FIRST = "_pass1"  # after the name of a video: its pass-1 video (control "color")
+GUIDE_INSET = 6  # color guide: the towel color is taken this many px inside the towel outline of frame 0
+GUIDE_MIN_PX = 150  # color guide: a view with fewer such pixels at frame 0 takes the color of the other view
 
 
 def ref_video(png: str, mp4: str, frames: int, fps: int) -> None:
@@ -135,7 +144,8 @@ def other_version(pairs: list, rows: dict, sources: dict, chosen: variations.Spe
             if image_version(rows.get((n, sources.get(n, ""))), chosen) != chosen.version]
 
 
-def spec(name: str, control: str, ref: str, prompt: str, seed: int, steps: int, depth: str | None = None) -> dict:
+def spec(name: str, control: str, ref: str, prompt: str, seed: int, steps: int, depth: str | None = None,
+         color: str | None = None) -> dict:
     out = {
         "model_mode": "video2video", "resolution": "480", "aspect_ratio": "16,9", "num_frames": 81, "fps": 16,
         "shift": 5.0, "num_steps": steps, "seed": seed, "num_video_frames_per_chunk": 81, "num_conditional_frames": 1,
@@ -146,6 +156,8 @@ def spec(name: str, control: str, ref: str, prompt: str, seed: int, steps: int, 
     }
     if depth:
         out["depth"] = {"control_path": depth}
+    if color:  # the color guide is the blur control of Cosmos
+        out["blur"] = {"control_path": color}
     return out
 
 
@@ -182,6 +194,91 @@ def depth_control(h5path: str, demo: int, mp4: str) -> None:
             views.append(np.repeat(np.round(gray * 255.0).astype(np.uint8)[..., None], 3, axis=-1))
     frames = [make_videos.tile(a, b) for a, b in zip(*views)]
     make_videos.write(mp4, frames, make_videos.FPS, make_videos.LOSSLESS_RGB, check=True)
+
+
+def towel_tables(h5path: str, h5, demo: int) -> dict:
+    """Camera -> {instance id: prim path} of one demo, for the color guide. Stops when the demo has no raw instance
+    ids or no table for them (demos made with --no_raw)."""
+    import make_videos
+
+    table_path = h5path[: -len(".hdf5")] + "_instance_ids.json"  # a run folder; a dataset has the table in each demo
+    run_tables = json.load(open(table_path)) if os.path.isfile(table_path) else {}
+    group = h5["data"][f"demo_{demo}"]
+    tables = check_references.demo_tables(group, run_tables)
+    for cam in make_videos.camera_keys(h5, None, None):
+        key = f"{make_videos.prefix(cam)}_instance_raw"
+        if key not in group["obs"] or not tables.get(cam):
+            sys.exit(f"{h5path}: no {key} or no instance id table for it (demos made with --no_raw): the color "
+                     "guide needs them to find the towel")
+    return tables
+
+
+def cosmos_blur(img):
+    """The blur that Cosmos applies when it makes a blur control itself (preset medium): half size, bilateral filter
+    (d 30, sigma color 150, sigma space 100 at 720 px), full size, then 1/10 size and back. Cosmos uses a control
+    file as it is, so the color guide gets this blur here."""
+    h, w = img.shape[:2]
+    x = cv2.resize(img, (w // 2, h // 2), interpolation=cv2.INTER_AREA)
+    scale = max(x.shape[:2]) / 720.0
+    d = max(1, int(round(30 * scale)))
+    d = d + 1 if d % 2 == 0 else d
+    x = cv2.bilateralFilter(x, d, max(1.0, 150 * scale), max(1.0, 100 * scale))
+    x = cv2.resize(x, (w, h), interpolation=cv2.INTER_LINEAR)
+    small = cv2.resize(x, (int(w / 10), int(h / 10)), interpolation=cv2.INTER_CUBIC)
+    return cv2.resize(small, (w, h), interpolation=cv2.INTER_CUBIC)
+
+
+def color_guide(h5path: str, demo: int, ref_png: str, first: str, mp4: str) -> None:
+    """Color guide of one demo: its pass-1 video (first) with the towel painted in one color, then cosmos_blur.
+    The towel pixels are the instance ids of the object in the demo. The color is the median color (Lab) of the towel
+    in the reference image at frame 0, GUIDE_INSET px inside its outline, per view. A view with fewer than
+    GUIDE_MIN_PX such pixels takes the color of the other view. Everything else stays as it is in the pass-1 video.
+    Room | wrist, lossless. Raises ValueError when the guide cannot be made."""
+    import numpy as np
+
+    import make_videos
+
+    img, _, _, reason = check_references.load_and_resize(ref_png)
+    if img is None:
+        raise ValueError(f"{ref_png}: {reason}")
+    cap, frames = cv2.VideoCapture(first), []
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    cap.release()
+    with status.open_hdf5(h5path) as h5:
+        tables = towel_tables(h5path, h5, demo)
+        obs = h5["data"][f"demo_{demo}"]["obs"]
+        masks = []  # per view: (frames, H, W) bool, True on the towel
+        for cam in make_videos.camera_keys(h5, None, None):
+            ids = obs[f"{make_videos.prefix(cam)}_instance_raw"]
+            ids = ids[:][make_videos.sample_idx(ids.shape[0])][..., 0]
+            masks.append(check_references.group_ids(ids, tables[cam]) == 2)
+    n, h, half = masks[0].shape
+    size = frames[0].shape[1::-1] if frames else (0, 0)
+    if len(frames) != n or size != (2 * half, h) or img.shape[1::-1] != size:
+        raise ValueError(f"{first}: {len(frames)} frames of {size[0]}x{size[1]}, the demo has {n} frames of "
+                         f"{2 * half}x{h}")
+    lab = cv2.cvtColor(img.astype(np.float32) / 255.0, cv2.COLOR_RGB2Lab)
+    kernel = np.ones((2 * GUIDE_INSET + 1, 2 * GUIDE_INSET + 1), np.uint8)
+    colors = []  # per view: the towel color (Lab), or None
+    for k, mask in enumerate(masks):
+        inner = cv2.erode(mask[0].astype(np.uint8), kernel) > 0
+        view = lab[:, k * half:(k + 1) * half]
+        colors.append(np.median(view[inner], axis=0) if inner.sum() >= GUIDE_MIN_PX else None)
+    seen = [c for c in colors if c is not None]
+    if not seen:
+        raise ValueError("the towel is not visible at frame 0, so it has no color for the guide")
+    rgb = [np.clip(np.round(cv2.cvtColor((seen[0] if c is None else c).reshape(1, 1, 3).astype(np.float32),
+                                         cv2.COLOR_Lab2RGB) * 255.0), 0, 255).astype(np.uint8)[0, 0] for c in colors]
+    out = []
+    for t, frame in enumerate(frames):
+        for k, mask in enumerate(masks):
+            frame[:, k * half:(k + 1) * half][mask[t]] = rgb[k]
+        out.append(cosmos_blur(frame))
+    make_videos.write(mp4, out, make_videos.FPS, make_videos.LOSSLESS_RGB, check=True)
 
 
 def checked_references(run_dir: str, wanted: list | None, skip_check: bool) -> list:
@@ -325,11 +422,12 @@ def place_video(out: str, idx: int, name: str, meta: dict) -> bool:
 
 
 def tidy(out: str, pairs: list, meta: dict) -> list:
-    """After the run: move every complete video (place_video), remove the temporary files when nothing is missing.
-    Returns the names whose video is missing (their folders stay)."""
-    missing = [name for idx, name in pairs if not place_video(out, idx, name, meta.get(name, {}))]
+    """After the run: move every complete video (place_video) that is not in its group folder yet, remove the
+    temporary files when nothing is missing. Returns the names whose video is missing (their folders stay)."""
+    missing = [name for idx, name in pairs if not complete(f"{out}/{layout.chunk(idx)}/{name}.mp4")
+               and not place_video(out, idx, name, meta.get(name, {}))]
     if not missing:
-        for d in ("refs", "specs", "controls"):
+        for d in ["refs", "specs", "controls"] + [name + FIRST for _, name in pairs]:
             shutil.rmtree(f"{out}/{d}", ignore_errors=True)
         for f in ("console.log",):
             if os.path.isfile(f"{out}/{f}"):
@@ -441,7 +539,8 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, prompts: dict,
                    "references": [n for _, n in pairs], "seed": args.seed, "steps": args.steps, "gpus": args.gpus,
                    "cp": args.cp, "port": port, "started": time.strftime("%Y-%m-%dT%H:%M:%S")})
     status.write_json(f"{out}/run_config.json", config)
-    specs, meta = [], {}
+    specs, meta = [], {}  # specs: the videos that need one framework run
+    two_pass = []  # (demo, name, pass-1 spec, final spec, reference image, color guide): the videos with a color guide
     for idx, name in pairs:
         control = f"{layout.demo_dir(run_dir, idx)}/{layout.demo_name(idx)}_geoedge.mp4"
         ref = f"{layout.ref_dir(run_dir + '/refs', idx)}/{name}.png"
@@ -459,9 +558,18 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, prompts: dict,
             depth = f"{out}/controls/{name}_depth.mp4"
             depth_control(demo_hdf5(run_dir), idx, depth)
         path = f"{out}/specs/{name}.json"
+        if "color" in vspec.controls:  # two passes: the guide is made from the pass-1 video, after it is done
+            with status.open_hdf5(demo_hdf5(run_dir)) as h5:
+                towel_tables(demo_hdf5(run_dir), h5, idx)  # stops now when the demo has no instance ids
+            first, guide = f"{out}/specs/{name}{FIRST}.json", f"{out}/controls/{name}_color.mp4"
+            with open(first, "w") as f:  # pass 1: the edge control only
+                json.dump(spec(name + FIRST, control, ref_mp4, prompt, args.seed, args.steps), f, indent=1)
+            two_pass.append((idx, name, first, path, ref, guide))
+        else:
+            guide = None
+            specs.append(path)
         with open(path, "w") as f:
-            json.dump(spec(name, control, ref_mp4, prompt, args.seed, args.steps, depth), f, indent=1)
-        specs.append(path)
+            json.dump(spec(name, control, ref_mp4, prompt, args.seed, args.steps, depth, guide), f, indent=1)
     config["spec"] = ",".join(sorted({v.version for v, _ in prompts.values()}))  # each video json has its own
     config["policy_data"] = meta  # lets a later job take over the videos if this one ends without moving them
     status.write_json(f"{out}/run_config.json", config)
@@ -470,17 +578,62 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, prompts: dict,
     env = framework_env(os.path.abspath(args.framework), args.tools)
     env["CUDA_VISIBLE_DEVICES"] = args.gpus
     env["HF_HOME"] = os.path.abspath(args.hf_home)
-    cmd = [f"{os.path.abspath(args.framework)}/.venv/bin/torchrun", f"--nproc-per-node={n_gpu}", f"--master-port={port}",
-           f"{os.path.dirname(os.path.abspath(__file__))}/cosmos_launch.py",
-           "--parallelism-preset=throughput", f"--dp-shard-size={n_gpu}", "--dp-replicate-size=1", f"--cp-size={args.cp}",
-           "--cfgp-size=1", "-i", *specs, "-o", out, "--checkpoint-path", os.path.abspath(args.checkpoint),
-           "--no-guardrails", "--benchmark", "--experiment-overrides", "model.config.tokenizer.encode_chunk_frames.480=4"]
+
+    def command(spec_files: list) -> list:
+        return [f"{os.path.abspath(args.framework)}/.venv/bin/torchrun", f"--nproc-per-node={n_gpu}",
+                f"--master-port={port}", f"{os.path.dirname(os.path.abspath(__file__))}/cosmos_launch.py",
+                "--parallelism-preset=throughput", f"--dp-shard-size={n_gpu}", "--dp-replicate-size=1",
+                f"--cp-size={args.cp}", "--cfgp-size=1", "-i", *spec_files, "-o", out, "--checkpoint-path",
+                os.path.abspath(args.checkpoint), "--no-guardrails", "--benchmark", "--experiment-overrides",
+                "model.config.tokenizer.encode_chunk_frames.480=4"]
+
     print(f"[run_cosmos] {len(pairs)} videos: demos {status.ranges(i for i, _ in pairs)} -> {out}", flush=True)
-    print("[run_cosmos]", " ".join(cmd), flush=True)
+    if specs:
+        print("[run_cosmos]", " ".join(command(specs)), flush=True)
+    if two_pass:  # the two commands of the first of these videos; the others differ only in the spec file
+        print(f"[run_cosmos] {len(two_pass)} videos with a color guide: two framework runs for each video, "
+              "for example", flush=True)
+        print("[run_cosmos] pass 1:", " ".join(command([two_pass[0][2]])), flush=True)
+        print("[run_cosmos] pass 2:", " ".join(command([two_pass[0][3]])), flush=True)
     if args.dry_run:
         return 0
     keep = [fd for fd in [status.lock_fd(out, status.RUNNING_LOCK)] if fd is not None]
-    rc, stopped = run_framework(cmd, os.path.abspath(args.framework), env, f"{out}/run.log", keep)
+    rc, stopped = 0, False
+
+    def framework(spec_files: list) -> None:
+        nonlocal rc, stopped
+        code, stopped = run_framework(command(spec_files), os.path.abspath(args.framework), env, f"{out}/run.log", keep)
+        rc = rc or code
+
+    try:
+        with status.stop_signals():  # also between two framework runs
+            if specs:
+                framework(specs)
+            failed = 0  # videos with a color guide that failed one after the other
+            for idx, name, first, final, ref, guide in two_pass:
+                if stopped:
+                    break
+                if failed == 2:
+                    print("[run_cosmos] two videos in a row failed: the job stops here", flush=True)
+                    break
+                failed += 1
+                framework([first])
+                video = f"{out}/{name}{FIRST}/vision.mp4"
+                if stopped or not complete(video):
+                    continue  # no pass-1 video: the name is reported as missing below
+                try:
+                    color_guide(demo_hdf5(run_dir), idx, ref, video, guide)
+                except ValueError as e:
+                    print(f"[run_cosmos] {name}: no color guide: {e}", flush=True)
+                    continue
+                framework([final])
+                with status.lock(run_dir) if dataset else contextlib.nullcontext():  # as in tidy
+                    if place_video(out, idx, name, meta[name]):
+                        print(f"[run_cosmos] {name}: done", flush=True)
+                        failed = 0
+    except KeyboardInterrupt:
+        print("[run_cosmos] stopping, the finished videos are kept", flush=True)
+        stopped = True
     if dataset:
         with status.lock(run_dir):  # the videos appear under the list lock
             missing = tidy(out, pairs, meta)
@@ -496,8 +649,8 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, prompts: dict,
 def run_framework(cmd: list, cwd: str, env: dict, log_path: str, keep_fds: list) -> tuple[int, bool]:
     """Run torchrun in its own process group. The lock file descriptors in keep_fds stay open in it, so the claim of
     the job lasts as long as the framework runs. Ctrl-C, SIGTERM or SIGHUP stop the whole group (SIGKILL after
-    120 s). -> (exit code, stopped)"""
-    with open(log_path, "w") as log:
+    120 s). The log is appended: a job with a color guide runs the framework several times. -> (exit code, stopped)"""
+    with open(log_path, "a") as log:
         proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
                                 pass_fds=keep_fds)
         try:

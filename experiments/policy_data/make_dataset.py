@@ -1,8 +1,9 @@
-"""Make one dataset folder from the demos of several runs, and replace a demo in it.
+"""Make one dataset folder from the demos of several runs, replace a demo in it, and add demos to it.
 
   python experiments/policy_data/make_dataset.py --take <run>:<N> [<run>:<N> ...] [--out <folder>]
   python experiments/policy_data/make_dataset.py <dataset_dir> --replace <demo> --reason "<text>" [--from <run>]
       [--runs_dir <folder>]
+  python experiments/policy_data/make_dataset.py <dataset_dir> --add <run>:<N> [<run>:<N> ...] [--runs_dir <folder>]
 
 --take takes the first N demos of each run whose towel stays inside the room image in every frame, in the order
 given, and numbers them 0, 1, 2, ... Each run needs <run>/check_towel_in_view.csv first:
@@ -41,6 +42,17 @@ number that a running run_cosmos.py makes a video for (replace it after that job
 data stays in its source run. The hdf5 file does not shrink when a demo is replaced (h5repack makes it small again).
 --runs_dir <folder>: where the source runs are, when the dataset or the runs were moved (default: the relative paths
 in run_config.json).
+
+--add puts the next N unused demos of each run after the last demo of the dataset, with new numbers (a dataset with
+demos 0-749 gets 750, 751, ...). <run> is a run folder, or the name of a run of the dataset. A new run needs the same
+settings as the dataset and a seed that no other run of the dataset has; its room camera noise can differ (the
+script prints it). The folder and the hdf5 keep their names; n_demos in run_config.json and sources.csv grow, and
+run_config.json lists each --add under "added". An added demo is no spare any more: --replace finds no unused demo
+in a run when --add took them all. The place type shares are exact in every full group of 50 numbers, so add up to
+the end of a group when the shares matter. Like --replace, --add waits for make_references.py and for the hdf5, and
+only one of them runs on a dataset at a time. When it stops before it prints "added demos", run the same command
+again: it goes on with the demos that are not copied yet. Then make the reference images and the videos of the new
+numbers as for the others.
 """
 
 import argparse
@@ -394,16 +406,8 @@ def rej_folders(ds: str, n: int) -> set:
     return set(glob.glob(f"{ds}/sim_rejected/{layout.chunk(n)}/{layout.demo_name(n)}_r*"))
 
 
-def new_plan(args, ds: str, cfg: dict, n: int, data: h5py.Group) -> tuple[str, dict]:
-    """Check everything, choose the spare demo and write the plan (replaced.json, state started). Call it while
-    holding lock(ds). Nothing is written when a check fails."""
-    sources = status.read_csv(f"{ds}/sources.csv")
-    if not 0 <= n < len(sources):
-        sys.exit(f"--replace {n}: the dataset has demos 0-{len(sources) - 1}")
-    old = sources[n]
-    claims = status.cosmos_claims(ds)
-    if n in claims:
-        sys.exit(f"demo {n} is in a running Cosmos job (cosmos/{claims[n]}): replace it after that job ends")
+def used_sources(ds: str, sources: list) -> set:
+    """(source run, source demo) of every demo that the dataset has now or had before a --replace."""
     used = {(r["source_run"], int(r["source_demo"])) for r in sources}
     used |= {(r["old_source_run"], int(r["old_source_demo"])) for r in status.read_csv(f"{ds}/replacements.csv")}
     for path in glob.glob(f"{ds}/sim_rejected/*/*/replaced.json"):
@@ -414,6 +418,20 @@ def new_plan(args, ds: str, cfg: dict, n: int, data: h5py.Group) -> tuple[str, d
                          (j["new_source_run"], int(j["new_source_demo"]))}
         except (OSError, ValueError, KeyError, TypeError):
             print(f"note: {os.path.relpath(path, ds)} is unreadable or incomplete, not used", flush=True)
+    return used
+
+
+def new_plan(args, ds: str, cfg: dict, n: int, data: h5py.Group) -> tuple[str, dict]:
+    """Check everything, choose the spare demo and write the plan (replaced.json, state started). Call it while
+    holding lock(ds). Nothing is written when a check fails."""
+    sources = status.read_csv(f"{ds}/sources.csv")
+    if not 0 <= n < len(sources):
+        sys.exit(f"--replace {n}: the dataset has demos 0-{len(sources) - 1}")
+    old = sources[n]
+    claims = status.cosmos_claims(ds)
+    if n in claims:
+        sys.exit(f"demo {n} is in a running Cosmos job (cosmos/{claims[n]}): replace it after that job ends")
+    used = used_sources(ds, sources)
     if args.from_run and not os.path.isfile(f"{args.from_run}/run_config.json"):
         sys.exit(f"--from {args.from_run}: no run_config.json there (not a run folder of make_demos.sh)")
     run = Run(resolve_run(ds, cfg, args.from_run or old["source_run"], args.runs_dir))
@@ -453,8 +471,9 @@ def new_plan(args, ds: str, cfg: dict, n: int, data: h5py.Group) -> tuple[str, d
     return f"{rej}/replaced.json", plan
 
 
-def mark_replace(ds: str, n: int) -> None:
-    """Write the demo number into .replace.lock (held by this process), so status.py knows which replace runs."""
+def mark_replace(ds: str, n) -> None:
+    """Write the demo number into .replace.lock (held by this process), so status.py knows which replace runs.
+    --add writes the word add."""
     with open(f"{ds}/{status.REPLACE_LOCK}", "w") as f:
         f.write(f"{n}\n")
 
@@ -559,9 +578,124 @@ def replace(args) -> None:
     status.update(ds)
 
 
+def video_frames(mp4: str) -> int:
+    cap = cv2.VideoCapture(mp4)
+    n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.release()
+    return n
+
+
+def add_plan(args, ds: str, cfg: dict, data: h5py.Group) -> list:
+    """Check everything and choose the demos of --add. -> [(new number, run, source demo)]. Call it while holding
+    lock(ds). Nothing is written."""
+    if status.open_replacements(ds):
+        sys.exit("a --replace of this dataset stopped halfway: finish it first (see status.py)")
+    sources = status.read_csv(f"{ds}/sources.csv")
+    used, runs = used_sources(ds, sources), cfg.get("runs", {})
+    base = next(iter(runs.values()))["config"]
+    seeds = {int(v["config"]["seed"]) for v in runs.values()}
+    frames = video_frames(f"{layout.demo_dir(ds, 0)}/{layout.demo_name(0)}_geoedge.mp4")
+    plan, need, names = [], 0, set()
+    for t in args.add:
+        path, sep, n = t.rpartition(":")
+        if not sep or not n.isdigit() or int(n) < 1:
+            sys.exit(f"--add {t}: use <run folder or run name>:<number of demos>")
+        run = Run(resolve_run(ds, cfg, path, args.runs_dir))
+        if run.name in names:
+            sys.exit(f"--add: {run.name} is listed twice")
+        names.add(run.name)
+        diff = [k for k in SAME if run.cfg.get(k) != base.get(k)]
+        if diff:
+            sys.exit(f"{run.name} differs from the dataset in {diff}")
+        if json.loads(data.attrs["env_args"]) != run.env_args:
+            sys.exit(f"{run.name} has different env_args than the dataset")
+        if run.name not in runs:
+            if int(run.cfg["seed"]) in seeds:
+                sys.exit(f"{run.name} has seed {run.cfg['seed']}, which another run of the dataset has: the same "
+                         "seed repeats the start poses")
+            if run.frames() != frames:
+                sys.exit(f"{run.name} has {run.frames()} video frames, the dataset has {frames}")
+            seeds.add(int(run.cfg["seed"]))
+        spare = [s for s in run.in_view() if (run.name, s) not in used and run.usable(s)]
+        if len(spare) < int(n):
+            sys.exit(f"{run.name}: {len(spare)} unused demos with the towel in view and all videos, --add asks for {n}")
+        first = len(sources) + len(plan)
+        plan += [(first + k, run, s) for k, s in enumerate(spare[:int(n)])]
+        with h5py.File(run.hdf5, "r") as src:
+            need += sum(storage(src["data"][f"demo_{s}"]) for s in spare[:int(n)])
+        if not can_link(run, ds):
+            need += sum(os.path.getsize(f) for s in spare[:int(n)] for f, _ in run.files(s))
+        print(f"{run.name}: {n} of {len(spare)} unused demos -> numbers {first}-{first + int(n) - 1} (room camera "
+              f"noise {noise(run.cfg)[0]} m, {noise(run.cfg)[1]} deg)", flush=True)
+    check_space(ds, need)
+    return plan
+
+
+def add(args) -> None:
+    ds = os.path.abspath(args.dataset_dir)
+    if not status.is_dataset(ds):
+        sys.exit(f"{ds} is not a dataset folder (no sources.csv)")
+    cfg = status.dataset_config(ds)
+    tmp_key = "_add_demo_"  # a demo of this --add in the hdf5, before it gets its number
+    # As --replace: one at a time; wait for make_references.py and for the hdf5 (without the list lock).
+    with status.stop_signals(), status.lock(ds, status.REPLACE_LOCK):
+        mark_replace(ds, "add")
+        with status.lock(ds, status.REFS_LOCK), status.open_hdf5(f"{ds}/{cfg['hdf5']}", "r+") as dst:
+            data = dst["data"]
+            with status.lock(ds):
+                plan = add_plan(args, ds, cfg, data)
+
+            def holds(key: str, run: Run, s: int) -> bool:
+                return key in data and data[key].attrs.get("source_run") == run.name \
+                    and int(data[key].attrs.get("source_demo", -1)) == s
+
+            # 1. Copy the new demos into the hdf5 under temporary keys. No list lock here: this takes a while.
+            for key in [k for k in data if k.startswith(tmp_key)]:
+                i = int(key[len(tmp_key):])
+                if not any(i == j and holds(key, run, s) for j, run, s in plan):  # a half copy, or of another --add
+                    del data[key]
+            t0 = time.time()
+            for run in dict.fromkeys(r for _, r, _ in plan):
+                with h5py.File(run.hdf5, "r") as src:
+                    for i, r, s in plan:
+                        if r is not run:
+                            continue
+                        if holds(f"demo_{i}", run, s) or holds(f"{tmp_key}{i}", run, s):
+                            continue  # copied by this command before it stopped
+                        if f"demo_{i}" in data:
+                            sys.exit(f"the hdf5 has demo_{i} already, from another demo: see status.py")
+                        copy_demo(src, run, s, data, f"{tmp_key}{i}")
+                        dst.flush()
+                        print(f"{layout.demo_name(i)} <- {run.name} demo {s} ({time.time() - t0:.0f} s)", flush=True)
+            # 2. Under the list lock: link the files, give the demos their numbers, update the lists.
+            with status.lock(ds):
+                rows = status.read_csv(f"{ds}/sources.csv")
+                for i, run, s in plan:
+                    link_files(run, s, ds, i)
+                    if f"{tmp_key}{i}" in data:
+                        data.move(f"{tmp_key}{i}", f"demo_{i}")
+                    rows.append(source_row(i, run, s, int(data[f"demo_{i}"].attrs.get("num_samples", 0))))
+                data.attrs["total"] = total_steps(data)
+                dst.flush()
+                cfg_now = json.load(open(f"{ds}/run_config.json"))
+                for run in dict.fromkeys(r for _, r, _ in plan):
+                    numbers = status.ranges(i for i, r, _ in plan if r is run)
+                    if run.name not in cfg_now.setdefault("runs", {}):
+                        cfg_now["runs"][run.name] = {"path": os.path.relpath(run.path, ds), "config": run.config()}
+                    added = cfg_now.setdefault("added", [])
+                    if not any(a["run"] == run.name and a["demos"] == numbers for a in added):  # not written yet
+                        added.append({"run": run.name, "demos": numbers, "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                                      "git_commit": git_commit()})
+                cfg_now["n_demos"] = len(rows)
+                status.write_json(f"{ds}/run_config.json", cfg_now)
+                status.write_csv(f"{ds}/sources.csv", rows, status.SOURCE_COLUMNS)  # last: the demos count from here
+    print(f"added demos {status.ranges(i for i, _, _ in plan)}: the dataset has {len(rows)} demos now")
+    status.update(ds)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("dataset_dir", nargs="?", help="dataset folder (for --replace)")
+    ap.add_argument("dataset_dir", nargs="?", help="dataset folder (for --replace and --add)")
     ap.add_argument("--take", nargs="+", metavar="RUN:N", help="make a new dataset from these runs")
     ap.add_argument("--out", default=None, help="folder for the new dataset (default: the folder of the first run)")
     ap.add_argument("--replace", type=int, default=None, metavar="DEMO", help="demo number to replace")
@@ -570,13 +704,18 @@ def main():
     ap.add_argument("--runs_dir", default=None, help="folder with the source runs (when they were moved)")
     ap.add_argument("--cancel", action="store_true",
                     help="with --replace: drop a replace that stopped before the new demo was linked")
+    ap.add_argument("--add", nargs="+", metavar="RUN:N", help="put the next N unused demos of these runs after the "
+                    "last demo of the dataset")
     args = ap.parse_args()
-    if args.take and args.replace is None and not args.dataset_dir:
+    if args.take and args.replace is None and not args.add and not args.dataset_dir:
         take(args)
-    elif args.dataset_dir and args.replace is not None and not args.take:
+    elif args.dataset_dir and args.replace is not None and not args.take and not args.add:
         replace(args)
+    elif args.dataset_dir and args.add and args.replace is None and not args.take:
+        add(args)
     else:
-        ap.error("use either --take RUN:N ... or <dataset_dir> --replace DEMO --reason TEXT")
+        ap.error("use --take RUN:N ..., or <dataset_dir> --replace DEMO --reason TEXT, or <dataset_dir> --add "
+                 "RUN:N ...")
 
 
 if __name__ == "__main__":
