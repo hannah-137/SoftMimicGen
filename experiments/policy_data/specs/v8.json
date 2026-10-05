@@ -1,6 +1,6 @@
 {
  "version": "v8",
- "changes": "v7 with two more materials and a color guide for Cosmos. Materials: microfiber (thin) and cotton twill (medium) are new, next to the six of v7. Color guide: a third control video, next to the edge and the depth video (key cosmos.controls, name color). Each video is made in two passes. Pass 1 uses the edge video only. The color guide is the pass-1 video with the fabric repainted in one color: the color that the fabric has in the reference image. Pass 2 uses the edge video, the depth video and the color guide, and makes the final video. Before, the color and the look of the fabric often changed on the lifted and folded part. In tests on demos that already had a video, the fabric kept its color on the folded part with the guide. Microfiber and cotton twill gave no clear flaw (one demo each). Strong weave patterns (waffle weave, herringbone) still changed, so they are not in the list. A flaw of the pass-1 video outside the fabric stays in the final video. A video takes about 39 minutes on 2 GPUs (pass 1 about 12, pass 2 about 27).",
+ "changes": "v7 with three more materials and a color guide for Cosmos. Materials: microfiber (thin), cotton twill (medium) and oxford cloth (thin) are new, next to the six of v7. Color guide: a third control video, next to the edge and the depth video (key cosmos.controls, name color). Each video is made in two passes. Pass 1 uses the edge video only. The color guide is the pass-1 video with the fabric repainted in one color: the color that the fabric has in the reference image. Pass 2 uses the edge video, the depth video and the color guide, and makes the final video. Before, the color and the look of the fabric often changed on the lifted and folded part. In tests on demos that already had a video, the fabric kept its color on the folded part with the guide. The three new materials were tested on one demo each: they kept their color and weave on the turned side. Strong weave patterns (waffle weave, herringbone) still changed, so they are not in the list. Two limits stay. A flaw of the pass-1 video outside the fabric stays in the final video. The lifted fabric can look thicker than the sheet in the simulator: Cosmos draws shallow creases as deep folds, and a depth video with stronger small differences did not change this. A video takes about 39 minutes on 2 GPUs (pass 1 about 12, pass 2 about 27).",
  "image": {
   "model": "gpt-image-2.5-sunburst",
   "quality": "medium",
@@ -449,7 +449,8 @@
     "wool flannel",
     "fleece",
     "microfiber",
-    "cotton twill"
+    "cotton twill",
+    "oxford cloth"
    ]
   },
   {
@@ -481,6 +482,9 @@
     ],
     "cotton twill": [
      "medium"
+    ],
+    "oxford cloth": [
+     "thin"
     ]
    }
   },
