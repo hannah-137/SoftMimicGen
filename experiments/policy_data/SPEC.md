@@ -14,6 +14,7 @@ shares, strong light slots) are in `variations.py`.
 |---|---|
 | Task | `franka_towel`, SoftMimicGen generation and success rule as upstream |
 | Cameras | room 512x512; wrist 512x512 with a 12 mm lens (upstream: 24 mm) |
+| Table | the upstream table (demos 000-749). Option `--table clean_top` for new demos: the same table without its metal parts (beam and post beside the table, handles, bolts) and with the bolt holes in the top closed, because Cosmos and the image model drew these parts in wrong ways |
 | Seed 1 | 50 demos, fixed room camera (dataset demos 000-049) |
 | Seeds 2 and 3 | 350 demos each, room camera moved once per demo: uniform, +-5 cm and +-5 degrees on each axis, towel fully in view at the start |
 | Towel in view | the towel stays inside the room image in every frame (`checks/check_towel_in_view.py`); other demos are not used |
