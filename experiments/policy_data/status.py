@@ -101,6 +101,7 @@ REASONS = [
     ("background", "Background problem"),
     ("wrist_background", "Wrist view background problem"),
     ("lighting", "Lighting problem"),
+    ("table", "Table problem"),
     ("image_quality", "Image quality problem (blur, smeared, overexposed)"),
     ("views_differ", "Room and wrist views do not match"),
 ]
