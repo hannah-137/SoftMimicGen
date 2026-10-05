@@ -17,7 +17,9 @@ made with Cosmos3. Needs only upstream SoftMimicGen and this folder.
   never changes. The room camera pose of every step is in `obs/agentview_camera_pose` (x, y, z, qw, qx, qy, qz).
 - `--table clean_top` uses the table of the task without its metal parts (the beam and the post beside the table,
   the handles, the bolts) and with the bolt holes in the top closed. The top itself is the upstream one: same
-  material, size and place. Default `upstream` = the table as it is. `run_config.json` records the choice.
+  material, size and place. `--table wide_top` is `clean_top` with a wider top: 0.60 m more toward the room camera
+  and 0.65 m more on each side, so the wrist camera does not see the floor beside the table; the room image then
+  shows no floor either. Default `upstream` = the table as it is. `run_config.json` records the choice.
 - Size: about 600 MB per demo with the raw data (50 demos = 30 GB). Write to a data disk. `--no_raw` gives
   about 100 MB per demo.
 
@@ -301,7 +303,7 @@ Folder names are fixed by the scripts. Do not rename them or add words.
 - `make_demos.sh` - runs generation and videos.
 - `setup.sh` - extra packages on top of the SoftMimicGen environment (openai).
 - `generate_demos.py` - upstream generation plus the camera settings and observations above.
-- `table.py` - the table with a clean top for `--table clean_top`.
+- `table.py` - the table with a clean top (`--table clean_top`) and with a clean and wider top (`--table wide_top`).
 - `observations.py` - `GeoEdgeImage` (copied from the fork), `RawCameraImage` and `camera_pose`.
 - `events.py` - the random camera move at reset.
 - `make_videos.py` - videos, sheets, summary (no GPU).

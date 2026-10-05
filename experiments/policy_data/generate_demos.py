@@ -14,7 +14,9 @@ demos, failed demos in <output>_failed.hdf5). This script only changes:
                   roll, pitch, yaw (default 0 = fixed camera, the upstream behavior). Drawn once per demo.
   --table         upstream (default): the table asset of the task as it is. clean_top: the same table without its
                   metal parts (beam and post beside the table, handles, bolts) and with the bolt holes in the top
-                  closed (see table.py). The changed table is written next to the output as <output>_table.usd.
+                  closed. wide_top: clean_top with a wider top (0.60 m toward the room camera, 0.65 m on each side),
+                  so the wrist camera does not see the floor (see table.py). The changed table is written next to
+                  the output as <output>_table.usd.
 
 and it records extra observations for both cameras (see observations.py):
 
@@ -55,7 +57,7 @@ parser.add_argument("--depth_jump", type=float, default=0.02, help="Edge rule: d
 parser.add_argument("--normal_angle", type=float, default=25.0, help="Edge rule: surface normal angle in degrees.")
 parser.add_argument("--camera_noise_pos", type=float, default=0.0, help="Room camera: random offset per demo, +- m on each axis.")
 parser.add_argument("--camera_noise_rot", type=float, default=0.0, help="Room camera: random rotation per demo, +- degrees on each axis.")
-parser.add_argument("--table", choices=["upstream", "clean_top"], default="upstream", help="Table: the upstream asset, or the same table with a clean top (see table.py).")
+parser.add_argument("--table", choices=["upstream", "clean_top", "wide_top"], default="upstream", help="Table: the upstream asset, the same table with a clean top, or with a clean and wider top (see table.py).")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
@@ -143,15 +145,15 @@ def configure(env_cfg, args) -> None:
             params={"sensor_cfg": SceneEntityCfg(args.room_camera), "pos_range_m": args.camera_noise_pos, "rot_range_deg": args.camera_noise_rot},
         )
         print(f"[policy_data] {args.room_camera}: random pose per demo, +-{args.camera_noise_pos} m, +-{args.camera_noise_rot} deg")
-    if args.table == "clean_top":
+    if args.table != "upstream":
         scene_table = getattr(env_cfg.scene, "table", None)
         if scene_table is None or not hasattr(scene_table.spawn, "usd_path"):
-            raise SystemExit("[policy_data] --table clean_top: this task has no table from a USD file")
+            raise SystemExit(f"[policy_data] --table {args.table}: this task has no table from a USD file")
         path = os.path.splitext(os.path.abspath(args.output_file))[0] + "_table.usd"
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        done = table.build(scene_table.spawn.usd_path, path)
-        print(f"[policy_data] table: clean top, {done['metal_parts']} metal parts left out, {done['holes']} holes "
-              f"closed ({done['holes_left']} left) -> {path}")
+        done = table.build(scene_table.spawn.usd_path, path, wide=args.table == "wide_top")
+        print(f"[policy_data] table: {args.table}, {done['metal_parts']} metal parts left out, {done['holes']} holes "
+              f"closed ({done['holes_left']} left), {done['plate_faces']} faces of the wide plate -> {path}")
         scene_table.spawn.usd_path = path
     print(f"[policy_data] seed {args.seed}")
 

@@ -14,11 +14,12 @@
 #              --wrist_focal MM (default 12)   --image_size PX (default 512)   --no_raw   --all_frames
 #              --room_camera NAME / --wrist_camera NAME (default agentview_image / robot0_eye_in_hand_image)
 #              --camera_noise_pos M --camera_noise_rot DEG (room camera: random offset per demo, default 0 = fixed)
-#              --table upstream|clean_top (default upstream; clean_top: no metal parts and no bolt holes, see table.py)
+#              --table upstream|clean_top|wide_top (default upstream; clean_top: no metal parts and no bolt holes;
+#              wide_top: clean_top with a wider top, so the wrist camera does not see the floor; see table.py)
 #
 # Run inside the SoftMimicGen environment (conda activate softmimicgen).
 set -eo pipefail
-usage() { sed -n '2,17p' "$0"; exit 1; }
+usage() { sed -n '2,18p' "$0"; exit 1; }
 [ $# -ge 2 ] || usage
 TASK="$1"; N="$2"; shift 2
 SEED=1; GPU=0; NUM_ENVS=1; WRIST_FOCAL=12; IMAGE_SIZE=512; RAW=""; FRAMES=""; CAM_POS=0; CAM_ROT=0; TABLE=upstream
