@@ -20,6 +20,9 @@ made with Cosmos3. Needs only upstream SoftMimicGen and this folder.
   material, size and place. `--table wide_top` is `clean_top` with a wider top: 0.60 m more toward the room camera
   and 0.65 m more on each side, so the wrist camera does not see the floor beside the table; the room image then
   shows no floor either. Default `upstream` = the table as it is. `run_config.json` records the choice.
+- `--ground plain` replaces the grid floor of the task by a flat floor of one plain gray color at the same height
+  (with collision). The image model drew the white grid lines of the floor as tiles, rails and pipes in the
+  reference images, and Cosmos kept them. Default `upstream` = the grid floor. `run_config.json` records the choice.
 - Size: about 600 MB per demo with the raw data (50 demos = 30 GB). Write to a data disk. `--no_raw` gives
   about 100 MB per demo.
 

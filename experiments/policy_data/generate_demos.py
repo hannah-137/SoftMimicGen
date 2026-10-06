@@ -17,6 +17,9 @@ demos, failed demos in <output>_failed.hdf5). This script only changes:
                   closed. wide_top: clean_top with a wider top (0.60 m toward the room camera, 0.65 m on each side),
                   so the wrist camera does not see the floor (see table.py). The changed table is written next to
                   the output as <output>_table.usd.
+  --ground        upstream (default): the ground of the task as it is (the Isaac grid floor). plain: a flat floor
+                  of one plain gray color at the same height, with collision, no grid lines (the image model drew
+                  the grid lines as tiles, rails and pipes).
 
 and it records extra observations for both cameras (see observations.py):
 
@@ -58,6 +61,7 @@ parser.add_argument("--normal_angle", type=float, default=25.0, help="Edge rule:
 parser.add_argument("--camera_noise_pos", type=float, default=0.0, help="Room camera: random offset per demo, +- m on each axis.")
 parser.add_argument("--camera_noise_rot", type=float, default=0.0, help="Room camera: random rotation per demo, +- degrees on each axis.")
 parser.add_argument("--table", choices=["upstream", "clean_top", "wide_top"], default="upstream", help="Table: the upstream asset, the same table with a clean top, or with a clean and wider top (see table.py).")
+parser.add_argument("--ground", choices=["upstream", "plain"], default="upstream", help="Ground: the grid floor of the task, or a flat floor of one plain gray color without grid lines.")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
@@ -79,6 +83,8 @@ import torch  # noqa: E402
 
 import omni  # noqa: E402
 
+import isaaclab.sim as sim_utils  # noqa: E402
+from isaaclab.assets import AssetBaseCfg  # noqa: E402
 from isaaclab.envs import ManagerBasedRLMimicEnv  # noqa: E402
 from isaaclab.managers import EventTermCfg, ObservationTermCfg, SceneEntityCfg  # noqa: E402
 
@@ -95,6 +101,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import events  # noqa: E402
 import observations  # noqa: E402
 import table  # noqa: E402
+
+PLAIN_GROUND_COLOR = (0.35, 0.35, 0.35)  # --ground plain: one gray, lighter than the table top so the table edge stays visible
+PLAIN_GROUND_SIZE = 200.0  # m, the box floor is far larger than any camera can see
+PLAIN_GROUND_THICKNESS = 0.02  # m
 
 
 def term_prefix(camera: str) -> str:
@@ -155,6 +165,21 @@ def configure(env_cfg, args) -> None:
         print(f"[policy_data] table: {args.table}, {done['metal_parts']} metal parts left out, {done['holes']} holes "
               f"closed ({done['holes_left']} left), {done['plate_faces']} faces of the wide plate -> {path}")
         scene_table.spawn.usd_path = path
+    if args.ground == "plain":
+        plane = getattr(env_cfg.scene, "plane", None)
+        if plane is None:
+            raise SystemExit("[policy_data] --ground plain: this task has no ground named 'plane' in its scene")
+        z = plane.init_state.pos[2]  # the floor of the task; the box top stays at this height
+        env_cfg.scene.plane = AssetBaseCfg(
+            prim_path=plane.prim_path,
+            init_state=AssetBaseCfg.InitialStateCfg(pos=[0.0, 0.0, z - PLAIN_GROUND_THICKNESS / 2]),
+            spawn=sim_utils.CuboidCfg(
+                size=(PLAIN_GROUND_SIZE, PLAIN_GROUND_SIZE, PLAIN_GROUND_THICKNESS),
+                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=PLAIN_GROUND_COLOR, roughness=0.9),
+                collision_props=sim_utils.CollisionPropertiesCfg(),
+            ),
+        )
+        print(f"[policy_data] ground: plain gray floor without grid lines, top at z = {z} m")
     print(f"[policy_data] seed {args.seed}")
 
 
