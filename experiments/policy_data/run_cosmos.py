@@ -2,6 +2,7 @@
 
   python experiments/policy_data/run_cosmos.py <run_dir> --framework <cosmos-framework dir> \
       --checkpoint <Cosmos3 checkpoint dir> --gpus 2,3 [--cp 2] [--demos 0-49] [--max 25] [--spec v2] [--port 29511]
+      [--all_steps]
 
 Input: <run_dir>/demos/000-049/demo_NNN/demo_NNN_geoedge.mp4 (control video) and the reference images in
 <run_dir>/refs/000-049/ (demo_NNN_<tag>.png or demo_NNN.png, checked by checks/check_references.py; 50 demos per
@@ -28,10 +29,23 @@ takes other numbers:
 In a run folder (make_demos.sh) the script refuses to start when refs/check_references.csv is missing or lists a
 failed image (--skip_check overrides). Without --demos it takes every image that passed.
 
+--all_steps makes a video with every simulator step instead of 81 picked steps. Frame i of the video is then step i
+of the demo in the hdf5, so the video frames and the actions of the demo match one to one. The script writes two more
+videos into the demo folder, from the demo hdf5: demo_NNN_geoedge_all.mp4 (the control video, lossless) and
+demo_NNN_source_all.mp4 (the simulator video, which review.py shows next to the Cosmos video), both at the control
+rate of the simulator (20 fps for the Franka tasks). The 81-frame videos stay as they are. Cosmos makes the video in
+one chunk of the next 4k+1 frames at or above the step count (133 frames for 131 to 133 steps), and the framework
+cuts the result to the step count. The framework writes 16 fps; the finished file is then stored at the control rate
+with a stream copy, so no frame is encoded again. One chunk of 133 frames fits on 2 GPUs of 48 GB with Super fp8 and
+takes about 23 minutes (81 frames: about 12). Longer demos are not tested. It works for the spec versions that use
+only the edge control (no depth, no color guide). The video json gets all_steps, frames and fps in policy_data.
+Use one kind of video in a dataset: all with --all_steps, or all without.
+
 Output: <run_dir>/cosmos/<checkpoint folder name>_<YYYYMMDD>_<HHMM>/ (with _2, _3, ... when that name exists) with,
 per reference, 000-049/<name>.mp4 (the video) and 000-049/<name>.json (the settings the framework used, plus
 policy_data: source demo, reference image name and sha1, seed, spec version), and run_config.json, run.log,
-debug.log and benchmark.json at the top. A video goes into its group folder only when it has all 81 frames.
+debug.log and benchmark.json at the top. A video goes into its group folder only when it has all its frames (81, or
+every step with --all_steps).
 Temporary files (reference videos, control videos, pass-1 videos, specs, framework folders) are removed after a
 successful run; after a failure everything stays for a look.
 Stop a job with Ctrl-C (or kill <pid>): the script stops the framework, keeps the finished videos and ends. The
@@ -77,7 +91,8 @@ import layout  # noqa: E402
 import status  # noqa: E402
 import variations  # noqa: E402
 
-N_FRAMES = 81  # frames of every video (spec num_frames)
+N_FRAMES = 81  # frames of a video (spec num_frames); with --all_steps a video has every step of its demo
+ALL = "_all"  # after the name of a demo video: the one with every step (--all_steps), next to the 81-frame one
 FIRST = "_pass1"  # after the name of a video: its pass-1 video (control "color")
 GUIDE_INSET = 6  # color guide: the towel color is taken this many px inside the towel outline of frame 0
 GUIDE_MIN_PX = 150  # color guide: a view with fewer such pixels at frame 0 takes the color of the other view
@@ -145,10 +160,12 @@ def other_version(pairs: list, rows: dict, sources: dict, chosen: variations.Spe
 
 
 def spec(name: str, control: str, ref: str, prompt: str, seed: int, steps: int, depth: str | None = None,
-         color: str | None = None) -> dict:
+         color: str | None = None, frames: int = N_FRAMES) -> dict:
+    """The framework spec of one video. frames: frames of the one chunk (81, or chunk_frames() with --all_steps)."""
     out = {
-        "model_mode": "video2video", "resolution": "480", "aspect_ratio": "16,9", "num_frames": 81, "fps": 16,
-        "shift": 5.0, "num_steps": steps, "seed": seed, "num_video_frames_per_chunk": 81, "num_conditional_frames": 1,
+        "model_mode": "video2video", "resolution": "480", "aspect_ratio": "16,9", "num_frames": frames, "fps": 16,
+        "shift": 5.0, "num_steps": steps, "seed": seed, "num_video_frames_per_chunk": frames,
+        "num_conditional_frames": 1,
         "share_vision_temporal_positions": True, "negative_metadata_mode": "none", "negative_prompt_keep_metadata": False,
         "guidance": 3.0, "control_guidance": 3.0, "name": name,
         "edge": {"control_path": control, "preset_edge_threshold": "medium"},
@@ -168,6 +185,72 @@ def demo_hdf5(run_dir: str) -> str:
     if path is None:
         sys.exit(f"no hdf5 in {run_dir}")
     return path
+
+
+def chunk_frames(steps: int) -> int:
+    """Frames of the one Cosmos chunk for a video with every step: the next 4k+1 at or above the step count (the
+    framework rounds a chunk up to 4k+1 frames and cuts the result to the control video)."""
+    return (steps + 2) // 4 * 4 + 1
+
+
+def video_frames(mp4: str) -> int:
+    """Frames of a video file, -1 when there is no such file."""
+    if not os.path.isfile(mp4):
+        return -1
+    cap = cv2.VideoCapture(mp4)
+    n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.release()
+    return n
+
+
+def step_videos(run_dir: str, idx: int) -> tuple:
+    """--all_steps: the control video and the simulator video of one demo with every step, in its demo folder:
+    <demo>_geoedge_all.mp4 (room | wrist with the 1-pixel line, lossless) and <demo>_source_all.mp4, at the control
+    rate of the simulator. Made from the demo hdf5 when a file is missing or has another frame count. The 81-frame
+    videos are not touched. -> (control video, steps, frames per second)"""
+    import make_videos
+
+    d, name = layout.demo_dir(run_dir, idx), layout.demo_name(idx)
+    control, source = f"{d}/{name}_geoedge{ALL}.mp4", f"{d}/{name}_source{ALL}.mp4"
+    h5path = demo_hdf5(run_dir)
+    with status.open_hdf5(h5path) as h5:
+        fps = make_videos.control_fps(h5)
+        room_key, wrist_key = make_videos.camera_keys(h5, None, None)
+        obs = h5["data"][f"demo_{idx}"]["obs"]
+        steps = obs[room_key].shape[0]
+        edge_keys = [f"{make_videos.prefix(k)}_geoedge" for k in (room_key, wrist_key)]
+        for key in edge_keys:
+            if key not in obs:
+                sys.exit(f"{h5path}: no {key} in demo_{idx}: --all_steps makes the control video from it")
+        os.makedirs(d, exist_ok=True)
+        if video_frames(control) != steps:
+            room, wrist = (obs[k][:][..., 0] for k in edge_keys)
+            frames = [cv2.cvtColor(make_videos.tile(a, b, line=True), cv2.COLOR_GRAY2RGB) for a, b in zip(room, wrist)]
+            tmp = f"{d}/.{name}_geoedge{ALL}.tmp{os.getpid()}.mp4"  # a stop never leaves half a file under the name
+            make_videos.write(tmp, frames, fps, make_videos.LOSSLESS_EDGE, check=True)
+            os.replace(tmp, control)
+        if video_frames(source) != steps:
+            frames = [make_videos.tile(a, b) for a, b in zip(obs[room_key][:], obs[wrist_key][:])]
+            tmp = f"{d}/.{name}_source{ALL}.tmp{os.getpid()}.mp4"
+            make_videos.write(tmp, frames, fps, None, check=False)
+            os.replace(tmp, source)
+    return control, steps, fps
+
+
+def set_fps(mp4: str, fps: float) -> None:
+    """Store a video at another frame rate without touching its frames: a stream copy with scaled time stamps."""
+    cap = cv2.VideoCapture(mp4)
+    now, n = cap.get(cv2.CAP_PROP_FPS), int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.release()
+    if now <= 0 or abs(now - fps) < 0.5:
+        return
+    tmp = mp4[: -len(".mp4")] + ".fps.mp4"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-itsscale", repr(now / fps), "-i", mp4, "-c", "copy",
+                    "-movflags", "+faststart", tmp], check=True)
+    if video_frames(tmp) != n:
+        os.remove(tmp)
+        sys.exit(f"{mp4}: the copy at {fps:g} fps does not have {n} frames")
+    os.replace(tmp, mp4)
 
 
 def depth_control(h5path: str, demo: int, mp4: str) -> None:
@@ -321,14 +404,10 @@ def new_run_folder(run_dir: str, checkpoint: str) -> str:
             out = f"{base}_{k}"
 
 
-def complete(mp4: str) -> bool:
-    """True when the video file has all N_FRAMES frames (a stopped writer leaves a file that cannot be read)."""
-    if not os.path.isfile(mp4):
-        return False
-    cap = cv2.VideoCapture(mp4)
-    n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    cap.release()
-    return n >= N_FRAMES
+def complete(mp4: str, frames: int = N_FRAMES) -> bool:
+    """True when the video file has all its frames (a stopped writer leaves a file that cannot be read). frames: 81,
+    or the steps of the demo for a video made with --all_steps (key frames of its policy_data)."""
+    return video_frames(mp4) >= frames
 
 
 def take_over(ds: str, rows: list) -> None:
@@ -400,10 +479,13 @@ def dataset_pairs(ds: str, wanted: list | None, max_n: int | None, args, stack) 
 
 def place_video(out: str, idx: int, name: str, meta: dict) -> bool:
     """<out>/<name>/vision.mp4 -> <out>/<group>/<name>.mp4 and sample_args.json -> <name>.json with the key
-    policy_data added. Only a complete video moves. -> True when it moved."""
+    policy_data added. Only a complete video moves. A video made with --all_steps (meta has frames and fps) is
+    stored at the control rate of the simulator first. -> True when it moved."""
     src = f"{out}/{name}"
-    if not complete(f"{src}/vision.mp4"):
+    if not complete(f"{src}/vision.mp4", int(meta.get("frames") or N_FRAMES)):
         return False
+    if meta.get("fps"):
+        set_fps(f"{src}/vision.mp4", float(meta["fps"]))
     dst = f"{out}/{layout.chunk(idx)}"
     os.makedirs(dst, exist_ok=True)
     info = {}
@@ -424,8 +506,11 @@ def place_video(out: str, idx: int, name: str, meta: dict) -> bool:
 def tidy(out: str, pairs: list, meta: dict) -> list:
     """After the run: move every complete video (place_video) that is not in its group folder yet, remove the
     temporary files when nothing is missing. Returns the names whose video is missing (their folders stay)."""
-    missing = [name for idx, name in pairs if not complete(f"{out}/{layout.chunk(idx)}/{name}.mp4")
-               and not place_video(out, idx, name, meta.get(name, {}))]
+    def placed(idx: int, name: str) -> bool:
+        return complete(f"{out}/{layout.chunk(idx)}/{name}.mp4", int(meta.get(name, {}).get("frames") or N_FRAMES))
+
+    missing = [name for idx, name in pairs
+               if not placed(idx, name) and not place_video(out, idx, name, meta.get(name, {}))]
     if not missing:
         for d in ["refs", "specs", "controls"] + [name + FIRST for _, name in pairs]:
             shutil.rmtree(f"{out}/{d}", ignore_errors=True)
@@ -487,6 +572,8 @@ def main():
                          "follows the version of its image); a json file for tests in a run folder")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps", type=int, default=35)
+    ap.add_argument("--all_steps", action="store_true",
+                    help="every simulator step is a video frame (one chunk), instead of 81 picked steps")
     ap.add_argument("--dry_run", action="store_true", help="write the specs and print the command, do not run")
     args = ap.parse_args()
     if not args.hf_home:
@@ -537,7 +624,8 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, prompts: dict,
     port = config.get("port") or args.port or free_port()
     config.update({"checkpoint": os.path.abspath(args.checkpoint), "demos": [i for i, _ in pairs],
                    "references": [n for _, n in pairs], "seed": args.seed, "steps": args.steps, "gpus": args.gpus,
-                   "cp": args.cp, "port": port, "started": time.strftime("%Y-%m-%dT%H:%M:%S")})
+                   "cp": args.cp, "port": port, "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                   "all_steps": bool(args.all_steps)})
     status.write_json(f"{out}/run_config.json", config)
     specs, meta = [], {}  # specs: the videos that need one framework run
     two_pass = []  # (demo, name, pass-1 spec, final spec, reference image, color guide): the videos with a color guide
@@ -551,8 +639,16 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, prompts: dict,
         meta[name] = {"source": sources.get(name, ""), "reference": name, "reference_sha1": status.file_sha1(ref),
                       "seed": args.seed, "cosmos_run": os.path.basename(out), "prompt": prompt,
                       "spec": vspec.version, "controls": vspec.controls}
+        frames = N_FRAMES  # frames of the one chunk
+        if args.all_steps:
+            if vspec.controls != ["edge"]:
+                sys.exit(f"{name}: spec {vspec.version} uses the controls {', '.join(vspec.controls)}; --all_steps "
+                         "works with the edge control alone")
+            control, n_steps, rate = step_videos(run_dir, idx)  # the control video with every step
+            frames = chunk_frames(n_steps)
+            meta[name].update(all_steps=True, frames=n_steps, fps=rate)
         ref_mp4 = f"{out}/refs/{name}.mp4"
-        ref_video(ref, ref_mp4, frames=81, fps=16)
+        ref_video(ref, ref_mp4, frames=frames, fps=16)
         depth = None
         if "depth" in vspec.controls:  # made here from the raw depth of the demo (a temporary file, like ref_mp4)
             depth = f"{out}/controls/{name}_depth.mp4"
@@ -569,7 +665,7 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, prompts: dict,
             guide = None
             specs.append(path)
         with open(path, "w") as f:
-            json.dump(spec(name, control, ref_mp4, prompt, args.seed, args.steps, depth, guide), f, indent=1)
+            json.dump(spec(name, control, ref_mp4, prompt, args.seed, args.steps, depth, guide, frames), f, indent=1)
     config["spec"] = ",".join(sorted({v.version for v, _ in prompts.values()}))  # each video json has its own
     config["policy_data"] = meta  # lets a later job take over the videos if this one ends without moving them
     status.write_json(f"{out}/run_config.json", config)

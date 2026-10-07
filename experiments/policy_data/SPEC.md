@@ -46,7 +46,7 @@ shares, strong light slots) are in `variations.py`.
 | Strong colored light | 2 of every 50 images (4%), indoor only: red, green, blue or yellow light over the whole scene |
 | Other axes | every item has the same chance |
 | No repeat | no two images in the dataset share the same 7 values |
-| Checks | missing image; wrong folder; aspect 2:1; layout score 0.70 or more in both views (share of the simulator robot and towel outline within 5 px of an image edge) |
+| Checks | missing image; wrong folder; aspect 2:1; layout against simulator frame 0: towel and table (both views) and robot (wrist view) within 8 px, no missing table edge, no other surface on more than 5 % of the table top or the towel, the same table look in both views |
 | On failure | the image is made again with another combination, at most 3 images per demo |
 
 Prompt (the same for every image; `{variation}` is the only part that changes):
@@ -77,7 +77,7 @@ Axes (every image changes all 7 at once):
 | Model | Cosmos3-Super fp8, video2video on 2 GPUs (context parallel 2) |
 | Control | the geoedge video of the demo (room and wrist side by side); from v7 also a depth video made from the raw depth of the demo (1 / depth as gray, near is white); from v8 also a color guide (the video of a first pass with the edge video only, with the fabric painted in the one color that it has in the reference image; Cosmos gets it as its blur control). All controls have the same weight |
 | Reference | the reference image as frame 0 |
-| Output | 81 frames, 16 fps, 1024x512 |
+| Output | 81 frames, 16 fps, 1024x512. With `run_cosmos.py --all_steps`: every step of the demo (131 to 133 frames for the Franka towel task), made in one chunk and stored at the control rate of the simulator (20 fps) |
 | Settings | 35 steps, guidance 3, control guidance 3, shift 5, seed 0 (a new seed when a video is made again) |
 | Review | a person marks every video approved, weak or rejected; weak and rejected need at least one reason; at most 3 videos per demo |
 

@@ -1,6 +1,7 @@
 """Check reference images before video generation. No GPU needed. Run it as often as you like.
 
   python experiments/policy_data/checks/check_references.py <run_dir> [--demos 0-49] [--refs <folder>] [--no_layout]
+                                                            [--workers 4]
 
 Input: the demo hdf5 in <run_dir> and the reference images in <run_dir>/refs/000-049/, <run_dir>/refs/050-099/, ...
 (the folder of the demo, 50 demos per folder, see layout.py), named demo_NNN_<tag>.png (several images per demo,
@@ -11,21 +12,28 @@ stay in check_references.csv as they were.
 
 Check 1, size: the image must have the 2:1 aspect of the tiled view (room | wrist). A different aspect is a failure
 (make the image again). The layout check and run_cosmos.py resize the image to 1024 x 512 themselves.
-Check 2, layout: the robot and the towel must be where the simulator has them in frame 0. Score = share of the
-simulator outline (from the raw instance ids, grouped into robot / object / environment by prim path, so joints
-between robot links do not count) that lies within 5 px of an edge in the image. Only the moving region (robot +
-towel) counts. Room and wrist views are scored separately. Pass: both >= 0.70.
+Check 2, layout (reference_layout.py): the table, the towel and the robot must have the shape, size and position
+that the simulator has in frame 0. The look may differ. The simulator masks come from the raw instance ids: robot
+and object by prim path, table = the instance that the object lies on. The check finds the true boundary of every
+object in the image and fails the image when
+  - the towel or the table (both views) or the robot (wrist view) is more than 8 px off, or
+  - a table edge is missing, or
+  - another surface covers more than 5 % of the table top or of the towel, or
+  - the table top looks different in the room view and in the wrist view.
+A boundary that cannot be measured is not a failure. The check takes about 4 s per image on one CPU core;
+--workers images are checked at the same time.
 The instance id table comes from the attribute instance_ids of data/demo_N (a dataset made by make_dataset.py: runs
-can number the ids differently) or else from <hdf5 name>_instance_ids.json next to the hdf5 (a run folder).
-Calibration (Franka towel, 2026-09-26): simulator frame 0.91 / 0.98, the same frame resized 0.85 / 0.99, earlier
-ChatGPT references 0.86-1.00, mirrored image 0.55 / 0.41, towel removed 0.38 in the wrist view.
+can number the ids differently) or else from <hdf5 name>_instance_ids.json next to the hdf5 (a run folder). The
+simulator normals come from the raw normals in the hdf5, or from demo_NNN_normals.mp4 in the folder of the demo (a
+dataset made with --skip_raw normals).
 
 Output, in the refs folder: check_references.csv (one row per image, with the sha1 of the checked file, so a later
 image with the same name counts as not checked). Only when something fails: failed_references.txt (images to make
-again, with the reason) and check_<name>.png next to the image (the image with the simulator outline drawn). Rows
-of other demos are kept only while they still describe the file on disk. Exit code 1 when anything checked in this
-run fails. Both files are written under the dataset lock (see status.py); in a dataset folder, status.py runs at
-the end.
+again, with the reason) and check_<name>.png next to the image (the image with the simulator outlines in red and
+the outlines found in the image in green). The columns room_score and wrist_score are empty: they belong to the
+earlier layout check and stay for the old rows. Rows of other demos are kept only while they still describe the
+file on disk. Exit code 1 when anything checked in this run fails. Both files are written under the dataset lock
+(see status.py); in a dataset folder, status.py runs at the end.
 """
 
 import argparse
@@ -35,20 +43,21 @@ import json
 import os
 import re
 import sys
+from multiprocessing import Pool
 
 import cv2
 import h5py
+import imageio
 import numpy as np
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import layout  # noqa: E402
+import make_videos  # noqa: E402
+import reference_layout  # noqa: E402
 import status  # noqa: E402
 
 TILE_W, TILE_H = 1024, 512
-TOL = 5  # px between a simulator outline pixel and an image edge
-MOTION_THR = 25  # brightness change vs frame 0 that counts as motion
-MIN_OUTLINE_PX = 80  # fewer outline pixels than this in the region: no score
-LAYOUT_MIN = 0.70
 COLUMNS = ["demo", "name", "file", "width", "height", "size_ok", "room_score", "wrist_score", "passed", "reason",
            "sha1"]
 
@@ -66,14 +75,6 @@ def camera_keys(obs) -> tuple[str, str]:
     return next(k for k in rgb if k != wrists[0]), wrists[0]
 
 
-def outline(ids: np.ndarray) -> np.ndarray:
-    """(H, W) ids -> (H, W) bool, True where the right or lower neighbor has another id."""
-    b = np.zeros(ids.shape, bool)
-    b[:, :-1] |= ids[:, :-1] != ids[:, 1:]
-    b[:-1, :] |= ids[:-1, :] != ids[1:, :]
-    return b
-
-
 def group_ids(ids: np.ndarray, table: dict | None) -> np.ndarray:
     """Instance ids -> 1 robot, 2 object, 3 environment (by prim path). Without a table the ids stay as they are."""
     if not table:
@@ -85,27 +86,6 @@ def group_ids(ids: np.ndarray, table: dict | None) -> np.ndarray:
     return out
 
 
-def motion_region(rgb: np.ndarray) -> np.ndarray:
-    """(T, H, W, 3) -> (H, W) bool: pixels that change during the demo, grown by 15 px."""
-    diff = np.abs(rgb.astype(np.int16) - rgb[:1].astype(np.int16)).max(axis=-1).max(axis=0) > MOTION_THR
-    diff = cv2.morphologyEx(diff.astype(np.uint8), cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-    return cv2.dilate(diff, np.ones((15, 15), np.uint8)) > 0
-
-
-def image_edges(img_rgb: np.ndarray) -> np.ndarray:
-    g = cv2.GaussianBlur(cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY), (5, 5), 0)
-    return cv2.Canny(g, 40, 120) > 0
-
-
-def layout_score(sim_outline: np.ndarray, img_rgb: np.ndarray, region: np.ndarray) -> float:
-    target = sim_outline & region
-    n = int(target.sum())
-    if n < MIN_OUTLINE_PX:
-        return float("nan")
-    near = cv2.dilate(image_edges(img_rgb).astype(np.uint8), np.ones((2 * TOL + 1, 2 * TOL + 1), np.uint8)) > 0
-    return float((target & near).sum()) / n
-
-
 def demo_tables(demo, run_tables: dict) -> dict:
     """camera -> {id: prim path} for one demo: its own attribute (dataset) or the table of the run."""
     if "instance_ids" in demo.attrs:
@@ -113,10 +93,73 @@ def demo_tables(demo, run_tables: dict) -> dict:
     return run_tables
 
 
-def sim_frame0(obs, cam: str, table: dict | None):
-    """(outline of frame 0, motion region) for one camera."""
-    ids = obs[f"{prefix(cam)}_instance_raw"][0][..., 0]
-    return outline(group_ids(ids, table)), motion_region(obs[cam][:])
+def normals_frame0(obs, cams: tuple, video: str):
+    """Frame 0 of the simulator normals of both cameras as uint8, (xyz + 1) * 127.5: from the raw normals in the
+    hdf5, or else from the normals video of the demo (room | wrist). None when there is neither."""
+    keys = [f"{prefix(c)}_normals_raw" for c in cams]
+    if all(k in obs for k in keys):
+        return [make_videos.normals_to_rgb(obs[k][0]) for k in keys]
+    if not os.path.isfile(video):
+        return None
+    with imageio.get_reader(video) as reader:
+        frame = reader.get_data(0)
+    w = frame.shape[1] // 2
+    return [np.ascontiguousarray(frame[:, :w]), np.ascontiguousarray(frame[:, w:])]
+
+
+def sim_views(obs, cams: tuple, tables: dict, normals: list):
+    """Frame 0 of both cameras as the input of reference_layout.check(). The table is the environment instance that
+    the object lies on: the instance with the most pixels right outside the object in the room view. None when the
+    room view shows no object on such an instance."""
+    views, prim = {}, None
+    for vname, cam, nrm in zip(reference_layout.VIEWS, cams, normals):
+        ids = obs[f"{prefix(cam)}_instance_raw"][0][..., 0]
+        groups = group_ids(ids, tables[cam])
+        if prim is None:  # the room view comes first
+            ring = (cv2.dilate((groups == 2).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0) & (groups == 3)
+            if not ring.any():
+                return None
+            vals, counts = np.unique(ids[ring], return_counts=True)
+            prim = tables[cam].get(str(int(vals[counts.argmax()])))
+            if prim is None:
+                return None
+        masks = {"table": np.isin(ids, [int(k) for k, v in tables[cam].items() if v == prim]),
+                 "towel": groups == 2, "robot": groups == 1}
+        views[vname] = reference_layout.view(cv2.cvtColor(obs[cam][0], cv2.COLOR_RGB2BGR), masks, ids == 0, nrm,
+                                             obs[f"{prefix(cam)}_geoedge"][0][..., 0] > 127)
+    return views
+
+
+def demo_views(demo, cams: tuple, run_tables: dict, normals_video: str):
+    """Simulator views of one demo for the layout check, or a text when frame 0 cannot be used. Exits when the
+    files do not hold what the check needs."""
+    obs, tables = demo["obs"], demo_tables(demo, run_tables)
+    missing = [f"{prefix(c)}_instance_raw" for c in cams if f"{prefix(c)}_instance_raw" not in obs]
+    if missing:
+        sys.exit(f"the layout check needs the raw instance ids, the hdf5 has no obs/{missing[0]} (or use --no_layout)")
+    if any(not tables.get(c) for c in cams):
+        sys.exit("the layout check needs the instance id table (see the docstring), it is missing (or use --no_layout)")
+    normals = normals_frame0(obs, cams, normals_video)
+    if normals is None:
+        sys.exit(f"the layout check needs the simulator normals: the hdf5 has no raw normals and {normals_video} "
+                 "is missing (or use --no_layout)")
+    return sim_views(obs, cams, tables, normals) or "simulator frame 0: no object on a table in the room view"
+
+
+def layout_check(job: tuple) -> list:
+    """One image in a worker process: (image RGB, simulator views, path of the drawing) -> the reasons why the image
+    fails (an empty list = pass). The drawing is written for a failed image and removed for a passed one."""
+    img, views, drawing = job
+    try:
+        ref = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        reasons, found = reference_layout.check(ref, views)
+    except Exception as e:  # noqa: BLE001  an image that breaks the check is not checked: it fails with the error
+        return [f"check error: {type(e).__name__}: {e}"]
+    if reasons:
+        cv2.imwrite(drawing, reference_layout.draw(ref, views, found))
+    elif os.path.isfile(drawing):  # drawing of an earlier failed image
+        os.remove(drawing)
+    return reasons
 
 
 def load_and_resize(path: str):
@@ -138,15 +181,6 @@ def decode_and_resize(data: bytes):
     return cv2.cvtColor(img, cv2.COLOR_BGR2RGB), w, h, ""
 
 
-def draw_fail(img_rgb: np.ndarray, outlines: list, path: str) -> None:
-    """Save the image with the simulator outlines drawn in red."""
-    out = img_rgb.copy()
-    for x0, ol in outlines:
-        ys, xs = np.nonzero(ol)
-        out[ys, xs + x0] = (255, 0, 0)
-    cv2.imwrite(path, cv2.cvtColor(out, cv2.COLOR_RGB2BGR))
-
-
 def still_valid(row: dict, run: str, refs: str) -> bool:
     """True when a kept row still describes the files on disk (see the docstring)."""
     if row["reason"] == "missing":  # still no image in the folder of the demo
@@ -165,6 +199,7 @@ def main():
     ap.add_argument("--refs", default=None, help="folder with the 000-049/... image folders (default <run_dir>/refs)")
     ap.add_argument("--hdf5", default=None, help="demo file (default: the one hdf5 in <run_dir> without _failed)")
     ap.add_argument("--no_layout", action="store_true", help="only the size check")
+    ap.add_argument("--workers", type=int, default=4, help="images checked at the same time (layout check)")
     args = ap.parse_args()
     run = os.path.abspath(args.run_dir)
     refs = os.path.abspath(args.refs or f"{run}/refs")
@@ -179,9 +214,26 @@ def main():
     run_tables = json.load(open(table_path)) if os.path.isfile(table_path) else {}
     wanted = status.parse_demos(args.demos)
 
-    rows, failed = [], []
+    rows, failed, batch = [], [], []
+
+    def flush():
+        """Run the layout check of the waiting images and finish their rows, in the order of the demos."""
+        jobs = [job for _, job in batch if job]
+        results = iter(pool.map(layout_check, jobs, chunksize=1) if jobs else [])
+        for row, job in batch:
+            if job:
+                reasons = next(results)
+                row.update(passed=not reasons, reason="; ".join(reasons))
+            if not row["passed"]:
+                failed.append(f"{row['name']}: {row['reason']}")
+            rows.append(row)
+            where = f" (it is in {os.path.dirname(row['file'])})" if row["reason"].startswith("wrong folder") else ""
+            print(f"{row['name']}: {'ok' if row['passed'] else 'FAIL ' + row['reason'] + where}", flush=True)
+        batch.clear()
+
     pending = status.pending_replacements(run) if status.is_dataset(run) else set()
-    with status.open_hdf5(h5path) as h5:
+    # The worker processes start before the hdf5 is open.
+    with Pool(max(1, args.workers)) as pool, status.open_hdf5(h5path) as h5:
         # Only data/demo_N: a stopped make_dataset.py --replace can leave a temporary key in the file.
         demos = sorted((k for k in h5["data"].keys() if re.fullmatch(r"demo_\d+", k)), key=lambda k: int(k[5:]))
         if wanted is not None:
@@ -194,7 +246,7 @@ def main():
         demos = [k for k in demos if int(k[5:]) not in pending]
         if not demos:
             sys.exit("no demos to check")
-        room_key, wrist_key = camera_keys(h5["data"][demos[0]]["obs"])
+        cams = camera_keys(h5["data"][demos[0]]["obs"])
         for key in demos:
             idx = int(key.split("_")[-1])
             demo = layout.demo_name(idx)
@@ -204,19 +256,15 @@ def main():
             for src in [f for f in files if os.path.dirname(f) != folder]:
                 name = os.path.basename(src)[: -len(".png")]
                 reason = f"wrong folder, move it to {os.path.relpath(folder, run)}"
-                rows.append({"demo": idx, "name": name, "file": os.path.relpath(src, run), "width": 0, "height": 0,
-                             "size_ok": False, "room_score": "", "wrist_score": "", "passed": False,
-                             "reason": reason})
-                failed.append(f"{name}: {reason}")
-                print(f"{name}: FAIL {reason} (it is in {os.path.relpath(os.path.dirname(src), run)})", flush=True)
+                batch.append(({"demo": idx, "name": name, "file": os.path.relpath(src, run), "width": 0, "height": 0,
+                               "size_ok": False, "room_score": "", "wrist_score": "", "passed": False,
+                               "reason": reason}, None))
             files = [f for f in files if os.path.dirname(f) == folder]
             if not files:
-                rows.append({"demo": idx, "name": demo, "file": "", "width": 0, "height": 0, "size_ok": False,
-                             "room_score": "", "wrist_score": "", "passed": False, "reason": "missing"})
-                failed.append(f"{demo}: missing")
-                print(f"{demo}: FAIL missing", flush=True)
+                batch.append(({"demo": idx, "name": demo, "file": "", "width": 0, "height": 0, "size_ok": False,
+                               "room_score": "", "wrist_score": "", "passed": False, "reason": "missing"}, None))
                 continue
-            sim = None
+            views = None
             for src in files:
                 name = os.path.basename(src)[: -len(".png")]
                 with open(src, "rb") as f:
@@ -226,32 +274,21 @@ def main():
                        "sha1": hashlib.sha1(data).hexdigest()}
                 img, w, h, reason = decode_and_resize(data)
                 row.update(width=w, height=h, size_ok=img is not None, reason=reason)
-                if img is not None:
-                    if args.no_layout:
-                        row["passed"] = True
+                job = None
+                if img is not None and args.no_layout:
+                    row["passed"] = True
+                elif img is not None:
+                    if views is None:
+                        views = demo_views(h5["data"][key], cams, run_tables,
+                                           f"{layout.demo_dir(run, idx)}/{demo}_normals.mp4")
+                    if isinstance(views, str):  # the simulator frame cannot be used
+                        row["reason"] = views
                     else:
-                        if sim is None:
-                            obs = h5["data"][key]["obs"]
-                            tables = demo_tables(h5["data"][key], run_tables)
-                            if not tables:
-                                print(f"note: {key} has no instance id table, the outline keeps every instance "
-                                      "boundary (stricter score)", flush=True)
-                            sim = sim_frame0(obs, room_key, tables.get(room_key)), sim_frame0(obs, wrist_key, tables.get(wrist_key))
-                        (ol_r, reg_r), (ol_w, reg_w) = sim
-                        s_r = layout_score(ol_r, img[:, :TILE_H], reg_r)
-                        s_w = layout_score(ol_w, img[:, TILE_H:], reg_w)
-                        row.update(room_score=round(s_r, 3), wrist_score=round(s_w, 3))
-                        bad = [f"{n} layout {s:.2f} < {LAYOUT_MIN}" for n, s in (("room", s_r), ("wrist", s_w)) if not s >= LAYOUT_MIN]
-                        row["passed"] = not bad
-                        row["reason"] = "; ".join(bad)
-                        if bad:
-                            draw_fail(img, [(0, ol_r), (TILE_H, ol_w)], f"{folder}/check_{name}.png")
-                        elif os.path.isfile(f"{folder}/check_{name}.png"):  # drawing of an earlier failed image
-                            os.remove(f"{folder}/check_{name}.png")
-                if not row["passed"]:
-                    failed.append(f"{name}: {row['reason']}")
-                rows.append(row)
-                print(f"{name}: {'ok' if row['passed'] else 'FAIL ' + row['reason']}", flush=True)
+                        job = (img, views, f"{folder}/check_{name}.png")
+                batch.append((row, job))
+            if len(batch) >= 4 * max(1, args.workers):
+                flush()
+        flush()
 
     # Keep the rows of the demos not checked in this run while they still describe the files on disk, and write both
     # files at once under the lock of the folder (the dataset or run folder, or the --refs folder outside it).

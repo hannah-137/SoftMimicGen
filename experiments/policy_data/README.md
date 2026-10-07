@@ -47,7 +47,7 @@ This writes a new folder. Videos are 81 frames at 16 fps; `--all_frames` keeps e
                 each image was made), refs/check_references.csv (+ failed_references.txt, and check_<name>.png
                 next to the image, only when something fails)
       refs_rejected/000-049/   images replaced by make_references.py --retry (<name>_attempt<N>.png), and
-                refs_rejected/rejected.csv (their scores and the reason)
+                refs_rejected/rejected.csv (the reason of the check)
       cosmos/<checkpoint>_<date>_<time>/000-049/   per reference: <name>.mp4 (the video) and <name>.json (the
                 settings the framework used, and policy_data: source demo, reference image and its sha1, seed);
                 run_config.json, run.log, debug.log, benchmark.json at the top
@@ -84,7 +84,9 @@ or `demo_NNN.png`. Then check them, then run:
     python experiments/policy_data/run_cosmos.py <run_dir> --framework <cosmos-framework> \
         --checkpoint <Cosmos3-Super-fp8> --hf_home <hf cache> --gpus 2,3 --cp 2
 
-The check rejects images that are not 2:1 and scores the layout (robot and towel where the simulator has them).
+The check rejects images that are not 2:1. It also checks the layout (`checks/reference_layout.py`): the table, the
+towel and the robot must have the shape, size and position of simulator frame 0 (within 8 px), and the table top
+must look the same in both views. It takes about 4 s per image on one CPU core (`--workers 4` by default).
 When something fails, `failed_references.txt` lists the images to make again. `--retry` makes at most 3 images per
 demo (`--max_attempts`). Images that were never made (for example after an API error) are made by the same command
 without `--retry`. In a run folder, `run_cosmos.py` only starts when every reference passed; in a dataset folder
@@ -163,6 +165,14 @@ work again every time: run them once per step. (`--replace` without `--reason` o
    spec version of each reference image (v2: a short prompt with the towel sentence of the image, for example "The
    towel is pewter bamboo fiber, plain, one solid color."), so a video always follows the version of its image.
    `--spec v3` takes only the images of that version.
+
+   `--all_steps` makes each video with every simulator step instead of 81 picked steps (131 to 133 frames for the
+   Franka towel task, about 23 minutes per video on 2 GPUs). Frame i of the video is then step i of the demo in the
+   hdf5, so the frames and the actions match one to one. The script writes the control video and the simulator video
+   with every step into the demo folder (`demo_NNN_geoedge_all.mp4`, `demo_NNN_source_all.mp4`); the 81-frame videos
+   stay. The finished video is stored at the control rate of the simulator (20 fps). The review page shows the
+   simulator video with every step next to it. It works with the edge control alone (spec versions up to v6). Use
+   one kind of video in a dataset.
 
    Steps 5 and 6 for many groups: `run_queue.py` does them group by group (images, check, retry, Cosmos). It makes
    the images of the next group while Cosmos runs, so the GPUs do not wait between groups, and it waits for a
@@ -325,6 +335,7 @@ Folder names are fixed by the scripts. Do not rename them or add words.
   the simulator demos.
 - `SPEC.md` - the dataset spec: demos, ratios, reference images, Cosmos settings.
 - `checks/check_references.py` - size and layout check of the reference images.
+- `checks/reference_layout.py` - the layout check of one image (used by `check_references.py`).
 - `checks/check_towel_stuck.py` - finds demos where the towel still hangs on the gripper at the last frame.
 - `checks/check_towel_in_view.py` - finds demos where the towel touches the image border in any frame.
 - `run_cosmos.py`, `cosmos_launch.py` - Cosmos3 video2video with the edge control video (from spec v7 also a
