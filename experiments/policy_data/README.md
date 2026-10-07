@@ -293,7 +293,8 @@ Folder names are fixed by the scripts. Do not rename them or add words.
 - Demo run: `runs/<task>_n<demos>_seed<seed>_<YYYYMMDD>_<HHMM>/`. Other settings (cameras, raw data) are in its
   `run_config.json`.
 - Dataset: `runs/<task>_n<demos>_seeds<seeds>_<YYYYMMDD>_<HHMM>/`, `<seeds>` = the seeds of its runs written one
-  after the other (seeds 1, 2 and 3: `seeds123`). Replaced demos: `sim_rejected/<AAA>-<BBB>/demo_<NNN>_r<k>/`.
+  after the other (seeds 1, 2 and 3: `seeds123`). With `make_dataset.py --take ... --name <name>` the folder is
+  `runs/<name>/` and the hdf5 is `<name>.hdf5`: for a dataset that grows with `--add`. Replaced demos: `sim_rejected/<AAA>-<BBB>/demo_<NNN>_r<k>/`.
 - Cosmos run: `<run dir>/cosmos/<checkpoint name>_<YYYYMMDD>_<HHMM>/` (`_2`, `_3`, ... when two jobs start in the
   same minute). Prompt, seed, steps and demos are in its `run_config.json`.
 - Demo folders: `demos/<AAA>-<BBB>/demo_<NNN>/`, 50 demos per group folder (000-049, 050-099, ...).

@@ -1,6 +1,6 @@
 """Make one dataset folder from the demos of several runs, replace a demo in it, and add demos to it.
 
-  python experiments/policy_data/make_dataset.py --take <run>:<N> [<run>:<N> ...] [--out <folder>]
+  python experiments/policy_data/make_dataset.py --take <run>:<N> [<run>:<N> ...] [--out <folder>] [--name <name>]
   python experiments/policy_data/make_dataset.py <dataset_dir> --replace <demo> --reason "<text>" [--from <run>]
       [--runs_dir <folder>]
   python experiments/policy_data/make_dataset.py <dataset_dir> --add <run>:<N> [<run>:<N> ...] [--runs_dir <folder>]
@@ -9,7 +9,9 @@
 given, and numbers them 0, 1, 2, ... Each run needs <run>/check_towel_in_view.csv first:
     python experiments/policy_data/checks/check_towel_in_view.py <run>/<name>.hdf5 --out <run>/check_towel_in_view.csv
 It writes a new folder <out>/<task>_n<total>_seeds<seeds>_<YYYYMMDD>_<HHMM>/ (default <out>: the folder of the
-first run; <seeds> are the seeds of the runs written one after the other, for example seeds123) with:
+first run; <seeds> are the seeds of the runs written one after the other, for example seeds123). --name <name> sets
+the name instead: the folder is <out>/<name>/ and the hdf5 is <name>.hdf5. Use it for a dataset that grows with
+--add, so the name does not state a demo count. The folder has:
   <task>_n<total>_seeds<seeds>.hdf5   the demos, copied. The runs keep theirs: --replace takes spare demos there.
   demos/, ref_sim/                    videos and frame-0 images, as hard links with the new numbers (no extra space;
                                       a copy when a hard link is not possible, for example on another disk)
@@ -283,9 +285,14 @@ def take(args) -> None:
         spare = f"demo {good[n]}" if len(good) > n else "none"
         print(f"{run.name}: {n} of {len(good)} usable demos (first spare: {spare})")
     total = len(selection)
-    stem = f"{first.cfg['task']}_n{total}_seeds{''.join(map(str, seeds))}"
     out = os.path.abspath(args.out or os.path.dirname(first.path))
-    name = f"{stem}_{time.strftime('%Y%m%d_%H%M')}"
+    if args.name:  # a fixed name, for a dataset that grows with --add
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", args.name):
+            sys.exit(f"--name {args.name}: use letters, digits, '_', '-' and '.' only")
+        stem = name = args.name
+    else:
+        stem = f"{first.cfg['task']}_n{total}_seeds{''.join(map(str, seeds))}"
+        name = f"{stem}_{time.strftime('%Y%m%d_%H%M')}"
     final, tmp = f"{out}/{name}", f"{out}/.{name}.partial"
     if os.path.exists(final) or os.path.exists(tmp):
         sys.exit(f"{final} (or {tmp}) exists already: use it, or remove it and run again")
@@ -698,6 +705,8 @@ def main():
     ap.add_argument("dataset_dir", nargs="?", help="dataset folder (for --replace and --add)")
     ap.add_argument("--take", nargs="+", metavar="RUN:N", help="make a new dataset from these runs")
     ap.add_argument("--out", default=None, help="folder for the new dataset (default: the folder of the first run)")
+    ap.add_argument("--name", default=None, help="with --take: name of the dataset folder and of its hdf5 "
+                    "(default: <task>_n<total>_seeds<seeds>, and the folder gets the date and time)")
     ap.add_argument("--replace", type=int, default=None, metavar="DEMO", help="demo number to replace")
     ap.add_argument("--reason", default=None, help="why the demo is replaced (goes into replacements.csv)")
     ap.add_argument("--from", dest="from_run", default=None, help="take the spare demo from this run folder")
@@ -707,6 +716,8 @@ def main():
     ap.add_argument("--add", nargs="+", metavar="RUN:N", help="put the next N unused demos of these runs after the "
                     "last demo of the dataset")
     args = ap.parse_args()
+    if args.name and not args.take:
+        ap.error("--name is for --take only")
     if args.take and args.replace is None and not args.add and not args.dataset_dir:
         take(args)
     elif args.dataset_dir and args.replace is not None and not args.take and not args.add:
