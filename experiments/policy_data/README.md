@@ -204,7 +204,10 @@ work again every time: run them once per step. (`--replace` without `--reason` o
 
 `make_dataset.py --take` copies the demos into one hdf5 and numbers them 0, 1, 2, ... The videos and frame-0 images
 are hard links to the runs (no extra disk space). The runs stay as they are: `--replace` takes spare demos there,
-and `--add` puts unused demos after the last number.
+and `--add` puts unused demos after the last number. `--take ... --skip_raw depth normals` leaves the raw depth and
+normals out of the dataset hdf5 (about 90 MB per demo instead of 350 MB). The runs keep them. Policy training does
+not read them. `run_config.json` records the choice (`skip_raw`), and `--add` and `--replace` follow it. The depth
+control of `run_cosmos.py` needs the raw depth, so it does not work on a dataset made with `--skip_raw depth`.
 
     runs/<task>_n<demos>_seeds<seeds>_<date>_<time>/
       <task>_n<demos>_seeds<seeds>.hdf5   data/demo_N as in a run, plus the attributes source_run, source_demo and

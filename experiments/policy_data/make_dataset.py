@@ -1,6 +1,7 @@
 """Make one dataset folder from the demos of several runs, replace a demo in it, and add demos to it.
 
   python experiments/policy_data/make_dataset.py --take <run>:<N> [<run>:<N> ...] [--out <folder>] [--name <name>]
+      [--skip_raw <kind> ...]
   python experiments/policy_data/make_dataset.py <dataset_dir> --replace <demo> --reason "<text>" [--from <run>]
       [--runs_dir <folder>]
   python experiments/policy_data/make_dataset.py <dataset_dir> --add <run>:<N> [<run>:<N> ...] [--runs_dir <folder>]
@@ -24,6 +25,12 @@ table of its run in the attribute instance_ids of data/demo_N (json: camera -> i
 and source_demo. There is no <name>_instance_ids.json in a dataset. The hdf5 copy needs about 350 MB per demo; the
 script stops before it starts when the disk has less free space. The folder is built under a temporary name
 (.<name>.partial) and renamed at the end, so a stopped run leaves no half dataset.
+--skip_raw <kind> ... leaves the raw renderer data of these kinds (depth, normals, instance) out of the dataset
+hdf5: the observations <camera>_<kind>_raw are not copied. The runs keep them. Depth and normals are about three
+quarters of a demo (about 250 of 350 MB), and policy training does not read them. run_config.json records the
+choice as "skip_raw", and --add and --replace leave out the same kinds. What reads the raw data of a dataset:
+run_cosmos.py reads depth for the depth control and instance for the color guide, and checks/check_references.py
+reads instance. Nothing reads normals.
 
 --replace puts the next unused demo of the same run (or of --from <run>) at number <demo>: for a demo that looks
 wrong in the simulator, or whose reference image or video failed too often. The number keeps its place type and
@@ -80,6 +87,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SAME = ["task", "image_size", "wrist_focal_mm", "room_camera", "wrist_camera", "raw"]  # must match across runs
 NOISE = ["camera_noise_pos_m", "camera_noise_rot_deg"]
 NEEDED = ["_source.mp4", "_geoedge.mp4"]  # per-demo videos a dataset demo must have
+RAW_KINDS = ("depth", "normals", "instance")  # --skip_raw: the observations <camera>_<kind>_raw
 GB = 1e9
 
 
@@ -238,9 +246,27 @@ def link_files(run: Run, s: int, ds: str, i: int, overwrite: bool = False) -> tu
     return linked, copied
 
 
-def copy_demo(src: h5py.File, run: Run, s: int, data: h5py.Group, key: str) -> int:
-    """Copy data/demo_<s> of a run into the dataset group under key (compressed chunks as they are). -> steps"""
-    src.copy(src["data"][f"demo_{s}"], data, name=key)
+def copy_demo(src: h5py.File, run: Run, s: int, data: h5py.Group, key: str, skip_raw=()) -> int:
+    """Copy data/demo_<s> of a run into the dataset group under key (compressed chunks as they are). With skip_raw
+    (kinds of RAW_KINDS) the observations <camera>_<kind>_raw are left out; everything else is copied. -> steps"""
+    demo = src["data"][f"demo_{s}"]
+    if not skip_raw:
+        src.copy(demo, data, name=key)
+    else:
+        ends = tuple(f"_{kind}_raw" for kind in skip_raw)
+        g = data.create_group(key)
+        for k, v in demo.attrs.items():
+            g.attrs[k] = v
+        for name, item in demo.items():
+            if name != "obs":
+                src.copy(item, g, name=name)
+                continue
+            obs = g.create_group("obs")
+            for k, v in item.attrs.items():
+                obs.attrs[k] = v
+            for term, value in item.items():
+                if not term.endswith(ends):
+                    src.copy(value, obs, name=term)
     g = data[key]
     g.attrs["instance_ids"] = json.dumps(run.tables, sort_keys=True)
     g.attrs["source_run"] = run.name
@@ -307,6 +333,9 @@ def take(args) -> None:
         need += os.path.getsize(run.hdf5) * sum(1 for r, _ in selection if r is run) // max(len(run.keys), 1)
         if not can_link(run, out):  # the videos are copied, not linked
             need += sum(os.path.getsize(f) for r, s in selection if r is run for f, _ in r.files(s))
+    skip_raw = sorted(set(args.skip_raw or []))
+    if skip_raw:
+        print(f"left out of the hdf5: the raw {', '.join(skip_raw)} data (the copy is smaller than the estimate below)")
     check_space(out, need)
 
     os.makedirs(tmp)
@@ -323,7 +352,7 @@ def take(args) -> None:
                                 if k != "total":
                                     data.attrs[k] = v
                         for i, s in picked:
-                            steps = copy_demo(src, run, s, data, f"demo_{i}")
+                            steps = copy_demo(src, run, s, data, f"demo_{i}", skip_raw)
                             steps_total += steps
                             a, b = link_files(run, s, tmp, i)
                             linked, copied = linked + a, copied + b
@@ -337,7 +366,7 @@ def take(args) -> None:
                 "task": first.cfg["task"], "n_demos": total, "hdf5": f"{stem}.hdf5",
                 "created": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "git_commit": git_commit(),
                 "variation_seed": status.VARIATION_SEED, "tag": status.TAG, "max_attempts": status.MAX_ATTEMPTS,
-                "takes": [{"run": r.name, "n": n} for r, n in specs],
+                "skip_raw": skip_raw, "takes": [{"run": r.name, "n": n} for r, n in specs],
                 "runs": {r.name: {"path": os.path.relpath(r.path, final), "config": r.config()} for r, _ in specs}})
             os.rename(tmp, final)
     except BaseException:
@@ -551,7 +580,7 @@ def replace(args) -> None:
                 if new_key in data:  # left from a stopped replace
                     del data[new_key]
                 with h5py.File(run.hdf5, "r") as src:
-                    copy_demo(src, run, s, data, new_key)
+                    copy_demo(src, run, s, data, new_key, cfg.get("skip_raw") or [])
             # 2. Under the list lock: move the old files, link the new ones, swap the hdf5 demo, update the lists.
             with status.lock(ds):
                 if plan["state"] == "started":  # nothing linked yet: move every file of the number, also new ones
@@ -672,7 +701,7 @@ def add(args) -> None:
                             continue  # copied by this command before it stopped
                         if f"demo_{i}" in data:
                             sys.exit(f"the hdf5 has demo_{i} already, from another demo: see status.py")
-                        copy_demo(src, run, s, data, f"{tmp_key}{i}")
+                        copy_demo(src, run, s, data, f"{tmp_key}{i}", cfg.get("skip_raw") or [])
                         dst.flush()
                         print(f"{layout.demo_name(i)} <- {run.name} demo {s} ({time.time() - t0:.0f} s)", flush=True)
             # 2. Under the list lock: link the files, give the demos their numbers, update the lists.
@@ -708,6 +737,8 @@ def main():
     ap.add_argument("--out", default=None, help="folder for the new dataset (default: the folder of the first run)")
     ap.add_argument("--name", default=None, help="with --take: name of the dataset folder and of its hdf5 "
                     "(default: <task>_n<total>_seeds<seeds>, and the folder gets the date and time)")
+    ap.add_argument("--skip_raw", nargs="+", choices=RAW_KINDS, default=None, metavar="KIND",
+                    help="with --take: leave the raw data of these kinds (depth, normals, instance) out of the hdf5")
     ap.add_argument("--replace", type=int, default=None, metavar="DEMO", help="demo number to replace")
     ap.add_argument("--reason", default=None, help="why the demo is replaced (goes into replacements.csv)")
     ap.add_argument("--from", dest="from_run", default=None, help="take the spare demo from this run folder")
@@ -719,6 +750,8 @@ def main():
     args = ap.parse_args()
     if args.name and not args.take:
         ap.error("--name is for --take only")
+    if args.skip_raw and not args.take:
+        ap.error("--skip_raw is for --take only (--add and --replace follow run_config.json of the dataset)")
     if args.take and args.replace is None and not args.add and not args.dataset_dir:
         take(args)
     elif args.dataset_dir and args.replace is not None and not args.take and not args.add:
