@@ -302,8 +302,9 @@ def take(args) -> None:
         print(f"note: left from a stopped run, remove by hand: {', '.join(left)}")
     need = 0
     for run, _ in specs:
-        with h5py.File(run.hdf5, "r") as src:
-            need += sum(storage(src["data"][f"demo_{s}"]) for r, s in selection if r is run)
+        # An estimate from the file size. The exact sum reads every dataset of every demo, which takes hours on a
+        # busy disk. The demos of one run have nearly the same size, and check_space adds a margin.
+        need += os.path.getsize(run.hdf5) * sum(1 for r, _ in selection if r is run) // max(len(run.keys), 1)
         if not can_link(run, out):  # the videos are copied, not linked
             need += sum(os.path.getsize(f) for r, s in selection if r is run for f, _ in r.files(s))
     check_space(out, need)
