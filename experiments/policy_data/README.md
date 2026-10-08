@@ -336,6 +336,9 @@ Folder names are fixed by the scripts. Do not rename them or add words.
 - `SPEC.md` - the dataset spec: demos, ratios, reference images, Cosmos settings.
 - `checks/check_references.py` - size and layout check of the reference images.
 - `checks/reference_layout.py` - the layout check of one image (used by `check_references.py`).
+- `checks/check_videos.py` - checks the Cosmos videos against the simulator in every frame: 10 scores per video
+  (sharpness, color, look, background, flicker, jumps, 4-frame pattern, control, room against wrist view, last
+  frames) and a final score. `checks/plot_check_videos.py` draws the graphs and a summary table from its results.
 - `checks/check_towel_stuck.py` - finds demos where the towel still hangs on the gripper at the last frame.
 - `checks/check_towel_in_view.py` - finds demos where the towel touches the image border in any frame.
 - `run_cosmos.py`, `cosmos_launch.py` - Cosmos3 video2video with the edge control video (from spec v7 also a
