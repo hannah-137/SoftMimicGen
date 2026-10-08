@@ -18,7 +18,7 @@ the name instead: the folder is <out>/<name>/ and the hdf5 is <name>.hdf5. Use i
                                       a copy when a hard link is not possible, for example on another disk)
   sources.csv                         demo number -> source run and demo, seed, room camera noise, steps
   run_config.json                     the takes, every run (relative path and its settings), and the fixed values
-                                      for the reference images: variation_seed 0, tag 01, max_attempts 10
+                                      for the reference images: variation_seed 0, tag 01, max_attempts 15
 All runs must have the same task, cameras, image size, video frames and simulation settings, and different seeds
 (the same seed repeats the start poses). The runs can number the instance ids differently, so every demo keeps the
 table of its run in the attribute instance_ids of data/demo_N (json: camera -> id -> prim path), next to source_run

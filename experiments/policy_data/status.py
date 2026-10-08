@@ -65,7 +65,7 @@ import variations
 HERE = os.path.dirname(os.path.abspath(__file__))
 SPEC = "v2"  # spec version (specs/<version>.json) of new reference images when --spec is not given
 UNRECORDED_SPEC = "v2"  # images made before refs/references.csv had the column spec (2026-09-29) follow v2
-MAX_ATTEMPTS = 10  # reference images per demo, and videos per demo, before the demo is replaced
+MAX_ATTEMPTS = 15  # reference images per demo, and videos per demo, before the demo is replaced
 TAG = "01"  # a dataset has one reference image per demo: demo_NNN_01.png
 VARIATION_SEED = 0  # seed of variations.py for the reference images of a dataset
 LISTS_LOCK = ".lists.lock"  # short: held while a list file is written or a tracked file is moved
