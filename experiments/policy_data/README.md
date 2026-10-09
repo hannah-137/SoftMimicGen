@@ -87,7 +87,7 @@ or `demo_NNN.png`. Then check them, then run:
 The check rejects images that are not 2:1. It also checks the layout (`checks/reference_layout.py`): the table, the
 towel and the robot must have the shape, size and position of simulator frame 0 (within 8 px), and the table top
 must look the same in both views. It takes about 4 s per image on one CPU core (`--workers 4` by default).
-When something fails, `failed_references.txt` lists the images to make again. `--retry` makes at most 10 images per
+When something fails, `failed_references.txt` lists the images to make again. `--retry` makes at most 5 images per
 demo (`--max_attempts`). Images that were never made (for example after an API error) are made by the same command
 without `--retry`. In a run folder, `run_cosmos.py` only starts when every reference passed; in a dataset folder
 it takes the demos that are ready (see step 6 below). It resizes the images to 1024 x 512 itself. Its output goes
@@ -204,7 +204,7 @@ work again every time: run them once per step. (`--replace` without `--reason` o
    the script starts again). From another machine, run the ssh command it prints on that machine, then open the
    address. With VSCode Remote-SSH, run the ssh command in a VSCode terminal and forward the port in the Ports panel
    (VSCode often does it by itself). Making rejected videos again (`run_cosmos.py --redo_bad`) comes in the next
-   version; a demo whose video fails 10 times gets replaced.
+   version; a demo whose video fails 5 times gets replaced.
 
 8. The state at any time:
 

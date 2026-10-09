@@ -30,7 +30,7 @@ shares, strong light slots) are in `variations.py`.
 - Each number has one reference image and one video. Nothing is dropped: a number is done when its video is
   approved or marked weak (usable but weak; review.csv keeps the mark).
 - A number gets another simulator demo (`make_dataset.py --replace`) when the demo looks wrong in the simulator,
-  its reference image failed 10 times, or its video was rejected 10 times. The number keeps its place type and its
+  its reference image failed 5 times, or its video was rejected 5 times. The number keeps its place type and its
   strong light slot, so the ratios below stay exact.
 
 ## Reference images
@@ -47,7 +47,7 @@ shares, strong light slots) are in `variations.py`.
 | Other axes | every item has the same chance |
 | No repeat | no two images in the dataset share the same 7 values |
 | Checks | missing image; wrong folder; aspect 2:1; layout against simulator frame 0: towel and table (both views) and robot (wrist view) within 8 px, no missing table edge, no other surface on more than 5 % of the table top or the towel, the same table look in both views |
-| On failure | the image is made again with another combination, at most 10 images per demo |
+| On failure | the image is made again with another combination, at most 5 images per demo |
 
 Prompt (the same for every image; `{variation}` is the only part that changes):
 
@@ -79,7 +79,7 @@ Axes (every image changes all 7 at once):
 | Reference | the reference image as frame 0 |
 | Output | 81 frames, 16 fps, 1024x512. With `run_cosmos.py --all_steps`: every step of the demo (131 to 133 frames for the Franka towel task), made in one chunk and stored at the control rate of the simulator (20 fps) |
 | Settings | 35 steps, guidance 3, control guidance 3, shift 5, seed 0 (a new seed when a video is made again) |
-| Review | a person marks every video approved, weak or rejected; weak and rejected need at least one reason; at most 10 videos per demo |
+| Review | a person marks every video approved, weak or rejected; weak and rejected need at least one reason; at most 5 videos per demo |
 
 ## Change history
 
