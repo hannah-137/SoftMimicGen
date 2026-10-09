@@ -122,7 +122,7 @@ REASON_IDS = [r[0] for r in REASONS]
 # also approved. The first level is the default; any other level counts as a reason.
 VIEWS = [("room", "Room view"), ("wrist", "Wrist view")]
 VIEW_ITEMS = [
-    ("towel_look", "towel look (color, texture, pattern)"),
+    ("towel_look", "towel look (color, texture, pattern, white patch)"),
     ("towel_shape", "towel shape (differs from the simulator, doubled, wrinkles)"),
     ("table", "table"),
     ("robot", "robot"),

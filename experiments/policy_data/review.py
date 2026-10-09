@@ -34,7 +34,8 @@ they stand in two columns under the Cosmos video, each under the half of the vid
 also has the level "Room and wrist views": how well the two views match (same, small difference, large difference,
 not the same). The level is saved with every verdict, also Approve, so videos can be left out by level later. It
 starts at same, any other level counts as a reason, and U puts it back to same. The verdict buttons, the level, the
-reference image tick and the line are under the simulator video.
+reference image tick and the line are under the simulator video. With version 2 the link to the reference image is
+next to the reference image tick, not in the head of the card.
 Simulator tab (--sim starts there): the simulator demos of the group, for the check right after make_dataset.py
 --take. Mark a demo that looks wrong; status.py then prints the make_dataset.py --replace command. It writes
 sim_review.csv. It has no Weak and no reasons.
@@ -547,7 +548,7 @@ main { padding-bottom: 70px; }
 .item.focus { outline: 2px solid var(--accent); }
 .head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
 .head .name { font-weight: 600; }
-.head a { color: var(--accent); }
+.head a, .side a { color: var(--accent); }
 .var { font-size: 12px; margin: 4px 0 8px; }
 .media { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }  /* Videos tab: simulator | Cosmos */
 .media.two { grid-template-columns: 2fr 1fr; }
@@ -570,7 +571,7 @@ label.dis { opacity: .5; }
 .media .views { grid-column: 2; grid-row: 2; }
 .media .side { grid-column: 1; grid-row: 2; font-size: 13px; }
 .side .controls { margin-top: 0; }
-.side .levels, .side > label, .side .line { margin-top: 6px; }
+.side .levels, .side .line { margin-top: 6px; }
 .side .line { display: flex; gap: 8px; align-items: center; }
 input.review { flex: 1; min-width: 200px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px;
                background: var(--bg); color: var(--fg); }
@@ -747,8 +748,10 @@ function headOf(it) {
 function reviewCard(it, i) {
   const card = el("div", { class: "item", id: "item" + i });
   const head = headOf(it);
+  let refLink = null;
   if (MODE === "videos") {  // the reference image is a link, so the two videos get the whole width
-    head.append(el("a", { href: fileUrl(it.files.ref), target: "_blank", rel: "noopener", text: "reference image" }));
+    refLink = el("a", { href: fileUrl(it.files.ref), target: "_blank", rel: "noopener", text: "reference image" });
+    if (!VIEWS.length) head.append(refLink);  // version 2: the link is next to the reference image tick
   }
   card.append(head);
   if (it.variation) card.append(el("div", { class: "var muted", text: it.variation }));
@@ -829,8 +832,9 @@ function reviewCard(it, i) {
     boxLabel = el("label", { title: "the reference image is the cause: a rejected video is made again with a new "
       + "reference image" }, box, " Reference image problem");
     const other = el("span", { class: "muted", text: "Other:" });
-    if (VIEWS.length) rs.append(boxLabel, el("div", { class: "line" }, other, txt));
-    else rs.append(boxLabel, other, txt);
+    if (VIEWS.length) {
+      rs.append(el("div", { class: "line" }, boxLabel, refLink), el("div", { class: "line" }, other, txt));
+    } else rs.append(boxLabel, other, txt);
     c.append(el("span", { class: "changed" }));
     if (!VIEWS.length) card.append(c, rs);
   } else {
