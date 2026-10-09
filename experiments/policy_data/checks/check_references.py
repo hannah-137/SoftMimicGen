@@ -16,7 +16,8 @@ Check 2, layout (reference_layout.py): the table, the towel and the robot must h
 that the simulator has in frame 0. The look may differ. The simulator masks come from the raw instance ids: robot
 and object by prim path, table = the instance that the object lies on. The check finds the true boundary of every
 object in the image and fails the image when
-  - the towel or the table (both views) or the robot (wrist view) is more than 8 px off, or
+  - the towel (both views), the table of the wrist view or the robot (wrist view) is more than 8 px off, or
+  - the table of the room view is more than 20 px off (the image model often draws it a little larger), or
   - a table edge is missing, or
   - another surface covers more than 5 % of the table top or of the towel, or
   - the table top looks different in the room view and in the wrist view, or

@@ -69,8 +69,10 @@ The sim mask is only a prior. The check looks for the true boundary in the refer
   floor).
 
 Pass rule (see check()): the image fails when
-  - the towel (both views), the table (both views) or the robot (wrist view) is more than N_PX = 8 px off (p95 of
-    the measured boundary, or 2 N_PX + 2 at one place), or
+  - the towel (both views), the table of the wrist view or the robot (wrist view) is more than N_PX = 8 px off (p95
+    of the measured boundary, or 2 N_PX + 2 at one place), or
+  - the table of the room view is more than N_PX_ROOM_TABLE = 20 px off (p95). The image model often draws this
+    table a little larger than the sim table, and viewers saw no clear difference up to about 20 px, or
   - a table edge with sim ground outside is missing, or no table edge at all is found in a view with void edges, or
   - a foreign patch covers more than PATCH_MAX = 5 % of the table top or of the towel, or
   - the table top looks different in the two views, or
@@ -167,6 +169,7 @@ FL_GROUP_MIN = 4    # blocks: a smaller group of floor-like blocks does not coun
 
 # pass rule
 N_PX = 8            # px: a boundary may lie this far from the sim boundary (p95), and 2 * N_PX + 2 at one place
+N_PX_ROOM_TABLE = 20  # px: the same for the table of the room view. 2 * 20 + 2 is beyond S_LINE, so the p95 decides
 PATCH_MAX = 0.05    # a foreign patch may cover this share of the interior
 MIN_AREA = 400      # px: smaller objects are skipped
 LOOK_MIN_PX = 2000  # px of interior needed in each view for the interior check, the table look and the floor look tests
@@ -1215,20 +1218,21 @@ def floor_look(room, room_view, room_interior, wrist, wrist_interior):
 
 
 # ---------------- pass rule ----------------
-def off_limit(row):
-    """True when a measured boundary is too far from the sim boundary."""
-    return row["off_p95"] > N_PX or row["off_max"] > 2 * N_PX + 2
+def off_limit(row, limit=N_PX):
+    """True when a measured boundary is too far from the sim boundary (limit in px)."""
+    return row["off_p95"] > limit or row["off_max"] > 2 * limit + 2
 
 
-def failures(name, row):
-    """Why one object of one view fails, as short texts. An empty list = ok, or not measured."""
+def failures(name, row, limit=N_PX):
+    """Why one object of one view fails, as short texts. An empty list = ok, or not measured.
+    limit: how far the boundary may lie from the sim boundary, in px."""
     out = []
     if name == "robot":
         if row["measured_frac"] < ROBOT_MIN_FRAC or np.isnan(row["off_p95"]):
             return out  # too little of the free outline measured: no result
         if row["saturated_frac"] >= ROBOT_MAX_SAT:
             out.append("outline not found")
-        if off_limit(row):
+        if off_limit(row, limit):
             out.append(f"outline {row['off_p95']:.0f} px off")
         return out
     patch = f"another surface on {100 * row['patch_frac']:.0f} % of it" if row["patch_frac"] > PATCH_MAX else ""
@@ -1245,7 +1249,7 @@ def failures(name, row):
         # A missing void edge alone is not a failure. No measured edge at all in such a view is one.
         if row["measured_frac"] == 0 and any(e["void"] for e in missing):
             out.append("no edge found")
-        if not np.isnan(row["off_p95"]) and off_limit(row):
+        if not np.isnan(row["off_p95"]) and off_limit(row, limit):
             out.append(f"edge {row['off_p95']:.0f} px off")
         return out
     if np.isnan(row["off_p95"]):  # towel, no boundary to measure
@@ -1253,17 +1257,17 @@ def failures(name, row):
     if row["reliable"]:
         if patch:
             out.append(patch)
-        if off_limit(row):
+        if off_limit(row, limit):
             out.append(f"outline {row['off_p95']:.0f} px off")
         return out
     # Not reliable (the outline moved with the prior): no boundary found, except when the exact run and a moved run
-    # both put the towel more than N_PX off and SMALLER than the sim. A towel drawn smaller leaves table pixels
+    # both put the towel more than the limit off and SMALLER than the sim. A towel drawn smaller leaves table pixels
     # inside the hard foreground, which is what makes GrabCut move with the prior. A larger result that moves with
     # the prior is a leak on a table of the same color. leak = the GrabCut region reached the outer limit.
     if patch:
         out.append(patch + ", or the towel is smaller")
-    if (not row["leak"] and row["off_p95"] > N_PX and row["off_dir"] < 0
-            and any(p > N_PX and d < 0 for p, d in zip(row["run_p95"], row["run_dir"]))):
+    if (not row["leak"] and row["off_p95"] > limit and row["off_dir"] < 0
+            and any(p > limit and d < 0 for p, d in zip(row["run_p95"], row["run_dir"]))):
         out.append(f"smaller than in the simulator ({row['off_p95']:.0f} px)")
     return out
 
@@ -1305,7 +1309,7 @@ def check(ref, views):
                     tables[vname] = (img, interior)
                 if name == "table" and interior.sum() >= LOOK_MIN_PX:
                     looks[vname] = look(img, interior)
-            fails = failures(name, row)
+            fails = failures(name, row, N_PX_ROOM_TABLE if (name == "table" and vname == "room") else N_PX)
             if fails:
                 reasons.append(f"{vname} {name}: " + ", ".join(fails))
     if len(looks) == 2:  # the table top must look the same in both views

@@ -85,8 +85,9 @@ or `demo_NNN.png`. Then check them, then run:
         --checkpoint <Cosmos3-Super-fp8> --hf_home <hf cache> --gpus 2,3 --cp 2
 
 The check rejects images that are not 2:1. It also checks the layout (`checks/reference_layout.py`): the table, the
-towel and the robot must have the shape, size and position of simulator frame 0 (within 8 px), the table top
-must look the same in both views, and no part of the wrist table may look like the floor of the room view. It takes
+towel and the robot must have the shape, size and position of simulator frame 0 (within 8 px; the table of the room
+view within 20 px), the table top must look the same in both views, and no part of the wrist table may look like the
+floor of the room view. It takes
 about 4 s per image on one CPU core (`--workers 4` by default).
 When something fails, `failed_references.txt` lists the images to make again. `--retry` makes at most 5 images per
 demo (`--max_attempts`). Images that were never made (for example after an API error) are made by the same command

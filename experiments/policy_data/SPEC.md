@@ -46,7 +46,7 @@ shares, strong light slots) are in `variations.py`.
 | Strong colored light | 2 of every 50 images (4%), indoor only: red, green, blue or yellow light over the whole scene |
 | Other axes | every item has the same chance |
 | No repeat | no two images in the dataset share the same 7 values |
-| Checks | missing image; wrong folder; aspect 2:1; layout against simulator frame 0: towel and table (both views) and robot (wrist view) within 8 px, no missing table edge, no other surface on more than 5 % of the table top or the towel, the same table look in both views, no part of the wrist table that looks like the floor of the room view |
+| Checks | missing image; wrong folder; aspect 2:1; layout against simulator frame 0: towel (both views), table of the wrist view and robot (wrist view) within 8 px, table of the room view within 20 px, no missing table edge, no other surface on more than 5 % of the table top or the towel, the same table look in both views, no part of the wrist table that looks like the floor of the room view |
 | On failure | the image is made again with another combination, at most 5 images per demo |
 
 Prompt (the same for every image; `{variation}` is the only part that changes):
