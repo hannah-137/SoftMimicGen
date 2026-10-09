@@ -20,6 +20,8 @@ demos, failed demos in <output>_failed.hdf5). This script only changes:
   --ground        upstream (default): the ground of the task as it is (the Isaac grid floor). plain: a flat floor
                   of one plain gray color at the same height, with collision, no grid lines (the image model drew
                   the grid lines as tiles, rails and pipes).
+  --rendering_mode  performance, balanced or quality: the renderer preset of Isaac Lab (its own option). Without
+                  it Isaac Lab uses balanced. make_demos.sh passes quality unless another mode is given.
 
 and it records extra observations for both cameras (see observations.py):
 

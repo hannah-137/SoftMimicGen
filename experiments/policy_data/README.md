@@ -23,6 +23,9 @@ made with Cosmos3. Needs only upstream SoftMimicGen and this folder.
 - `--ground plain` replaces the grid floor of the task by a flat floor of one plain gray color at the same height
   (with collision). The image model drew the white grid lines of the floor as tiles, rails and pipes in the
   reference images, and Cosmos kept them. Default `upstream` = the grid floor. `run_config.json` records the choice.
+- `--rendering_mode quality` (the default) renders with the quality preset of Isaac Lab; `balanced` and
+  `performance` are the other presets. Isaac Lab itself uses balanced, and so did every run from before 2026-10-09
+  (those runs have no `rendering_mode` in `run_config.json`). `run_config.json` records the choice.
 - Size: about 600 MB per demo with the raw data (50 demos = 30 GB). Write to a data disk. `--no_raw` gives
   about 100 MB per demo.
 
