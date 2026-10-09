@@ -129,7 +129,7 @@ VIEW_ITEMS = [
     ("floor", "floor"),
     ("background", "background"),
     ("lighting", "lighting"),
-    ("extra_object", "extra object (hand, tag, text)"),
+    ("extra_object", "extra object (hand, cable, text)"),
     ("image_quality", "image quality (blur, smear, flicker)"),
 ]
 VIEWS_TITLE = "Room and wrist views"
