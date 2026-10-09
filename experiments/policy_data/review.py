@@ -14,7 +14,7 @@ the reference image in a new tab, the variation of the image (the line "card" of
 table, lighting, towel, robot) and the spec version of the video. Mark each
 video Approve (O), Weak (a triangle: usable but weak) or Reject (X). Weak counts as done, like Approve; review.csv
 keeps the word weak, so weak videos can be counted or left out later. With Weak or Reject, tick one or more reasons
-(the list is REASONS in status.py), tick "reference image problem" when the image is the cause (a rejected video is
+(the review items, see below), tick "reference image problem" when the image is the cause (a rejected video is
 then made again with a new image), or write the reason in the line (any text there counts as a reason). A weak or
 rejected video without a reason is saved, but it counts as not reviewed until it has one (status.py: needs_review,
 note "no reason"); a rejected video is made again only when it has a reason. Submit writes review.csv (the current
@@ -28,6 +28,13 @@ filter stays in view until you move on with the keys (J, K, the arrows, Enter in
 submit; a mouse click on another card does not hide it, so the page does not jump under the mouse. A submit also
 keeps such a card when hiding it would move the card you work on (no room to scroll). Each tab starts with the
 filter All.
+Review items: a dataset has one version of them (review_items in its run_config.json; the lists are in status.py).
+Version 1 is one list of reasons (REASONS). Version 2 has the same items for the room view and for the wrist view;
+they stand in two columns under the Cosmos video, each under the half of the video that it is about. Version 2
+also has the level "Room and wrist views": how well the two views match (same, small difference, large difference,
+not the same). The level is saved with every verdict, also Approve, so videos can be left out by level later. It
+starts at same, any other level counts as a reason, and U puts it back to same. The verdict buttons, the level, the
+reference image tick and the line are under the simulator video.
 Simulator tab (--sim starts there): the simulator demos of the group, for the check right after make_dataset.py
 --take. Mark a demo that looks wrong; status.py then prints the make_dataset.py --replace command. It writes
 sim_review.csv. It has no Weak and no reasons.
@@ -63,12 +70,15 @@ import variations
 
 SERVED = (".mp4", ".png")
 DEFAULT_PORT = 8765
-REASON_TEXT = dict(status.REASONS)  # the reason list is in status.py
 
 
-def reason_text(reasons: str, ref_problem: str, line: str) -> str:
-    """The reasons of a review.csv row as one line of text, for the Rejected tab."""
-    parts = [REASON_TEXT[x] for x in status.reason_ids(reasons)]
+def reason_text(reasons: str, ref_problem: str, line: str, views: str, version: int) -> str:
+    """The reasons of a review.csv row as one line of text, for the Rejected tab. views: the level of the two views
+    (review items version 2), "" without one."""
+    text = dict(status.reasons_of(version))  # the review items are in status.py
+    parts = [text[x] for x in status.reason_ids(reasons, version)]
+    if views in status.VIEW_LEVEL_IDS[1:]:
+        parts.append(f"{status.VIEWS_TITLE}: {dict(status.VIEW_LEVELS)[views]}")
     parts += ["reference image problem"] if ref_problem == "1" else []
     parts += [line] if line else []
     return "; ".join(parts)
@@ -129,6 +139,7 @@ def items(ds: str, mode: str, group: str) -> dict:
     """Everything the page shows for one tab and group."""
     with status.lock(ds):
         rows, video_rows, problems = status.collect(ds)
+    version = status.review_items(ds)
     var = status.latest_refs(status.read_csv(f"{ds}/refs/references.csv"))
     groups = sorted({r["group"] for r in rows})
     group = group if group in groups else (groups[0] if groups else "")
@@ -150,9 +161,11 @@ def items(ds: str, mode: str, group: str) -> dict:
                           "cosmos": r["video"],
                           "ref": f"refs/{r['group']}/{r['reference']}.png"},
                 "verdict": rev.get("verdict", ""), "ref_problem": rev.get("ref_problem", "") == "1",
-                "reasons": status.reason_ids(rev.get("reasons", "")),
+                "reasons": status.reason_ids(rev.get("reasons", ""), version),
                 "review": rev.get("review", ""), "reviewed_at": rev.get("reviewed_at", ""),
                 "rejected_before": r["videos_rejected"]})
+            if version == 2:  # the level of the two views: the first one (same) until another one is saved
+                out[-1]["views"] = status.views_level(rev.get("views")) or status.VIEW_LEVEL_IDS[0]
     elif mode == "sim":
         sims = {(int(r["demo"]), r["source"]): r for r in status.read_csv(f"{ds}/sim_review.csv")}
         for r in rows:
@@ -171,16 +184,18 @@ def items(ds: str, mode: str, group: str) -> dict:
     else:  # rejected: to look at only (a rejected video without a reason is still to review: Videos tab)
         for r in rows:
             reason = status.has_reason({"reasons": r["reasons"], "ref_problem": r["ref_problem"],
-                                        "review": r["review_text"]})
+                                        "review": r["review_text"], "views": r.get("views", "")}, version)
             if r["group"] == group and r["review"] == "rejected" and reason and r["video"] and " " not in r["video"]:
                 out.append({"kind": "video", "demo": r["demo"], "name": r["reference"], "file": r["video"],
-                            "review": reason_text(r["reasons"], r["ref_problem"], r["review_text"]),
+                            "review": reason_text(r["reasons"], r["ref_problem"], r["review_text"],
+                                                  r.get("views", ""), version),
                             "source": r["source"],
                             "where": "still in place (run_cosmos.py --redo_bad makes it again, next version)"})
         for v in video_rows:
             if v["where"] == "rejected" and layout.chunk(int(v["demo"])) == group:
                 out.append({"kind": "video", "demo": int(v["demo"]), "name": v["name"], "file": v["file"],
-                            "review": reason_text(v["reasons"], v["ref_problem"], v["review_text"]),
+                            "review": reason_text(v["reasons"], v["ref_problem"], v["review_text"],
+                                                  v.get("views", ""), version),
                             "source": v["source"], "where": "cosmos_rejected/"})
         for r in status.read_csv(f"{ds}/refs_rejected/rejected.csv"):
             if layout.chunk(int(r["demo"])) == group:
@@ -189,12 +204,17 @@ def items(ds: str, mode: str, group: str) -> dict:
                             "where": "refs_rejected/" + (f" (room {r['room_score']}, wrist {r['wrist_score']})"
                                                          if r.get("room_score") else "")})
         out.sort(key=lambda x: (x["demo"], x["kind"], x["name"]))
-    return {"dataset": os.path.basename(ds), "mode": mode, "group": group, "groups": groups, "items": out,
+    page = {"dataset": os.path.basename(ds), "mode": mode, "group": group, "groups": groups, "items": out,
             "states": group_states(rows, group), "types": type_counts(rows), "problems": len(problems),
-            "reasons": [list(r) for r in status.REASONS] if mode == "videos" else []}
+            "reasons": [list(r) for r in status.reasons_of(version)] if mode == "videos" else []}
+    if version == 2 and mode == "videos":  # the reasons per view (the checkbox says the item only) and the levels
+        page["view_reasons"] = [[title, [[f"{view}_{item}", text] for item, text in status.VIEW_ITEMS]]
+                                for view, title in status.VIEWS]
+        page["views_title"], page["view_levels"] = status.VIEWS_TITLE, [list(x) for x in status.VIEW_LEVELS]
+    return page
 
 
-def _item_error(it, mode: str) -> str:
+def _item_error(it, mode: str, version: int) -> str:
     if not isinstance(it, dict):
         return "an item is not an object"
     key = it.get("key", "?")
@@ -204,30 +224,36 @@ def _item_error(it, mode: str) -> str:
     if not isinstance(it.get("review", ""), str) or not isinstance(it.get("ref_problem", False), bool):
         return f"{key}: the line must be text and the reference image tick true or false"
     if mode == "videos":
-        if "reasons" not in it:  # a page from before the reasons: saving it would drop the saved reasons
+        # a page from before the reasons, or from before the dataset got review items version 2: saving it would
+        # drop the saved reasons or the level
+        if "reasons" not in it or (version == 2 and "views" not in it):
             return f"{key}: this page is older than the review server: reload the page"
-        if not isinstance(it["reasons"], list) or any(x not in status.REASON_IDS for x in it["reasons"]):
+        ids = [x for x, _ in status.reasons_of(version)]
+        if not isinstance(it["reasons"], list) or any(x not in ids for x in it["reasons"]):
             return f"{key}: unknown reason in {it['reasons']!r}"
+        if version == 2 and it["views"] not in status.VIEW_LEVEL_IDS:
+            return f"{key}: unknown level {it['views']!r}"
     return ""
 
 
 def submit(ds: str, body: dict) -> dict:
     """Write the verdicts (and for videos the reasons) of one submit. A video (or demo) whose saved verdict changed
     since the page loaded it (loaded_at is not the stored reviewed_at) is refused. Reasons and the reference image
-    tick are kept only with weak or rejected. -> {"updated": {key: saved row with its new state}, "errors": [...],
-    "states", "types"}"""
+    tick are kept only with weak or rejected; the level of the two views (review items version 2) is kept with every
+    verdict. -> {"updated": {key: saved row with its new state}, "errors": [...], "states", "types"}"""
     mode, group, now = body.get("mode"), str(body.get("group", "")), time.strftime("%Y-%m-%dT%H:%M:%S")
     if mode not in ("videos", "sim") or not isinstance(body.get("items"), list):
         return {"updated": {}, "errors": ["bad request"]}
     updated, errors, history = {}, [], []
     with status.lock(ds):
         rows, _, _ = status.collect(ds)
+        version = status.review_items(ds)
         if mode == "videos":
             path = f"{ds}/review.csv"
             saved = {r["video"]: r for r in status.read_csv(path)}
             known = {status.video_id(r["video"]): r for r in rows if r["video"] and " " not in r["video"]}
             for it in body["items"]:
-                err = _item_error(it, mode)
+                err = _item_error(it, mode, version)
                 vid = str(it.get("key", "")) if not err else ""
                 r = known.get(vid)
                 if not err and r is None:
@@ -240,11 +266,13 @@ def submit(ds: str, body: dict) -> dict:
                     continue
                 verdict = it.get("verdict", "")
                 why = verdict in status.NEEDS_REASON  # reasons belong to weak and rejected only
-                reasons = [x for x in status.REASON_IDS if x in it["reasons"]] if why else []
+                reasons = [x for x, _ in status.reasons_of(version) if x in it["reasons"]] if why else []
                 row = {"video": vid, "demo": r["demo"], "name": r["reference"], "source": r["source"],
                        "verdict": verdict, "ref_problem": "1" if it.get("ref_problem") and why else "",
                        "reasons": ";".join(reasons), "review": str(it.get("review", "")).strip()[:500],
                        "reviewed_at": now if verdict else ""}
+                if version == 2:
+                    row["views"] = it["views"]
                 if verdict:
                     saved[vid] = row
                 else:
@@ -252,13 +280,15 @@ def submit(ds: str, body: dict) -> dict:
                 history.append({"kind": "video", **row, "reviewed_at": now})
                 updated[vid] = {"verdict": verdict, "ref_problem": row["ref_problem"] == "1", "reasons": reasons,
                                 "review": row["review"] if verdict else "", "reviewed_at": row["reviewed_at"]}
-            status.write_csv(path, list(saved.values()), status.REVIEW_COLUMNS)
+                if version == 2:  # a removed verdict takes the level back to the first one (same)
+                    updated[vid]["views"] = row["views"] if verdict else status.VIEW_LEVEL_IDS[0]
+            status.write_csv(path, list(saved.values()), status.columns(status.REVIEW_COLUMNS, version))
         else:
             path = f"{ds}/sim_review.csv"
             saved = {f"{int(r['demo'])}|{r['source']}": r for r in status.read_csv(path)}
             current = {f"{r['demo']}|{r['source']}" for r in rows}
             for it in body["items"]:
-                err = _item_error(it, mode)
+                err = _item_error(it, mode, version)
                 key = str(it.get("key", "")) if not err else ""
                 if not err and key not in current:
                     err = f"{key.split('|')[0]}: its simulator demo changed (--replace), not saved"
@@ -281,10 +311,10 @@ def submit(ds: str, body: dict) -> dict:
                                 "reviewed_at": row["reviewed_at"]}
             status.write_csv(path, sorted(saved.values(), key=lambda r: int(r["demo"])), status.SIM_REVIEW_COLUMNS)
         for h in history:
-            status.append_csv(f"{ds}/review_history.csv", h, status.REVIEW_HISTORY_COLUMNS)
+            status.append_csv(f"{ds}/review_history.csv", h,
+                              status.columns(status.REVIEW_HISTORY_COLUMNS, version))
         rows, video_rows, _ = status.collect(ds)  # the same as status.update, once
-        status.write_csv(f"{ds}/dataset.csv", rows, status.DATASET_COLUMNS)
-        status.write_csv(f"{ds}/videos.csv", video_rows, status.VIDEO_COLUMNS)
+        status.write_lists(ds, rows, video_rows)
     if mode == "videos":
         by_key = {status.video_id(r["video"]): r for r in rows if r["video"] and " " not in r["video"]}
     else:
@@ -533,6 +563,15 @@ video, .media img { width: 100%; aspect-ratio: 2 / 1; background: #000; display:
 label.dis { opacity: .5; }
 .reasons { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 14px; margin-top: 6px; font-size: 13px; }
 .reasons label { white-space: nowrap; }
+/* review items version 2: the reasons per view under the Cosmos video (room | wrist, like the video); the verdict
+   buttons, the level of the two views, the reference image tick and the line under the simulator video */
+.views { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; font-size: 13px; }
+.views label, .side label { display: block; }
+.media .views { grid-column: 2; grid-row: 2; }
+.media .side { grid-column: 1; grid-row: 2; font-size: 13px; }
+.side .controls { margin-top: 0; }
+.side .levels, .side > label, .side .line { margin-top: 6px; }
+.side .line { display: flex; gap: 8px; align-items: center; }
 input.review { flex: 1; min-width: 200px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px;
                background: var(--bg); color: var(--fg); }
 .changed { color: var(--warn); font-size: 12px; }
@@ -543,8 +582,14 @@ footer { position: fixed; bottom: 0; left: 0; right: 0; z-index: 3; background: 
           font-weight: 600; cursor: pointer; }
 #submit:disabled { opacity: .5; cursor: default; }
 .err { color: var(--bad); }
-@media (max-width: 800px) { .media, .media.two { grid-template-columns: 1fr; } }
-@media (orientation: portrait) { .media { grid-template-columns: 1fr; } }  /* higher than wide: larger when stacked */
+@media (max-width: 800px) {
+  .media, .media.two { grid-template-columns: 1fr; }
+  .media .views, .media .side { grid-column: 1; grid-row: auto; }
+}
+@media (orientation: portrait) {  /* higher than wide: larger when stacked */
+  .media { grid-template-columns: 1fr; }
+  .media .views, .media .side { grid-column: 1; grid-row: auto; }
+}
 </style>
 </head>
 <body>
@@ -569,8 +614,11 @@ footer { position: fixed; bottom: 0; left: 0; right: 0; z-index: 3; background: 
 "use strict";
 const T = new URLSearchParams(location.search).get("t") || "";
 let MODE = "__MODE__", GROUP = "__GROUP__", ITEMS = [], FOCUS = 0, SAVING = false, FILTER = "all", REASONS = [];
+// Review items version 2 (else empty): VIEWS = [[title of a view, its reasons], ...], LEVELS = the levels of
+// "Room and wrist views" ([id, text], the first one is the default) and LEVELS_TITLE.
+let VIEWS = [], LEVELS = [], LEVELS_TITLE = "";
 let INFLIGHT = null;  // key -> the state that the running submit sends (null when no submit runs)
-const changed = new Map();  // key -> {verdict, ref_problem, reasons, review}: edits not submitted yet
+const changed = new Map();  // key -> {verdict, ref_problem, reasons, review, views}: edits not submitted yet
 const NEEDS_REASON = ["weak", "rejected"];  // these verdicts count only with a reason
 const $ = (id) => document.getElementById(id);
 const fileUrl = (rel) => "/file/" + rel.split("/").map(encodeURIComponent).join("/") + "?t=" + encodeURIComponent(T);
@@ -601,9 +649,10 @@ const observer = new IntersectionObserver((entries) => {
   }
 }, { rootMargin: "300px" });
 
-// A weak or rejected video needs a reason: a ticked reason, the reference image tick, or a line of text.
-// Simulator demos need none.
-const hasReason = (c) => c.reasons.length > 0 || c.ref_problem || c.review.trim() !== "";
+// A weak or rejected video needs a reason: a ticked reason, the reference image tick, a line of text, or a level
+// of the two views other than the first one. Simulator demos need none.
+const hasReason = (c) => c.reasons.length > 0 || c.ref_problem || c.review.trim() !== ""
+  || (LEVELS.length > 0 && c.views !== LEVELS[0][0]);
 const noReason = (c) => MODE === "videos" && NEEDS_REASON.includes(c.verdict) && !hasReason(c);
 const isDone = (c) => !!c.verdict && !noReason(c);
 const verdictWords = () => MODE === "videos" ? "Approve, Weak or Reject" : "Looks right or Looks wrong";
@@ -648,6 +697,7 @@ async function load() {
   try { d = await api(`/api/items?mode=${MODE}&group=${encodeURIComponent(GROUP)}`); }
   catch (e) { $("list").textContent = String(e.message || e); return; }
   GROUP = d.group; ITEMS = d.items; REASONS = d.reasons || []; FOCUS = 0; changed.clear();
+  VIEWS = d.view_reasons || []; LEVELS = d.view_levels || []; LEVELS_TITLE = d.views_title || "";
   if (!filters().some(([f]) => f === FILTER)) FILTER = "all";  // no Weak on the Simulator tab
   $("keys").textContent = MODE === "videos"
     ? "A approve · W weak · R reject · U clear · ↓/J next · ↑/K back · Space play"
@@ -745,27 +795,49 @@ function reviewCard(it, i) {
   txt.oninput = () => edit(i, { review: txt.value });
   txt.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); txt.blur(); move(1); } };
   let rs = null, box = null, boxLabel = null;
-  const reasonBoxes = [];
+  const reasonBoxes = [], levelBoxes = [];
+  const reasonBox = (id, text) => {
+    const b = el("input", { type: "checkbox", class: "reason", "data-id": id });
+    b.onchange = () => { setFocus(i, false); tickReason(i, id, b.checked); b.blur(); };
+    const lab = el("label", {}, b, " " + text);
+    reasonBoxes.push([id, b, lab]);
+    return lab;
+  };
   if (MODE === "videos") {  // reasons: only with Weak or Reject
-    rs = el("div", { class: "reasons" });
-    for (const [id, text] of REASONS) {
-      const b = el("input", { type: "checkbox", class: "reason", "data-id": id });
-      b.onchange = () => { setFocus(i, false); tickReason(i, id, b.checked); b.blur(); };
-      const lab = el("label", {}, b, " " + text);
-      rs.append(lab); reasonBoxes.push([id, b, lab]);
+    if (VIEWS.length) {  // version 2: the reasons of a view under its half of the Cosmos video; the verdict
+      // buttons, the level, the reference image tick and the line under the simulator video
+      const views = el("div", { class: "views" });
+      for (const [title, reasons] of VIEWS) {
+        const col = el("div", {}, el("b", { text: title }));
+        for (const [id, text] of reasons) col.append(reasonBox(id, text));
+        views.append(col);
+      }
+      const levels = el("div", { class: "levels" }, el("b", { text: LEVELS_TITLE }));
+      for (const [id, text] of LEVELS) {
+        const b = el("input", { type: "radio", class: "level", name: "level" + i, "data-id": id });
+        b.onchange = () => { setFocus(i, false); edit(i, { views: id }); b.blur(); };
+        levels.append(el("label", {}, b, " " + text)); levelBoxes.push([id, b]);
+      }
+      rs = el("div", { class: "side" }, c, levels);
+      media.append(views, rs);
+    } else {
+      rs = el("div", { class: "reasons" });
+      for (const [id, text] of REASONS) rs.append(reasonBox(id, text));
     }
     box = el("input", { type: "checkbox", class: "refbox" });
     box.onchange = () => { setFocus(i, false); edit(i, { ref_problem: box.checked }); box.blur(); };
     boxLabel = el("label", { title: "the reference image is the cause: a rejected video is made again with a new "
       + "reference image" }, box, " Reference image problem");
-    rs.append(boxLabel, el("span", { class: "muted", text: "Other:" }), txt);
+    const other = el("span", { class: "muted", text: "Other:" });
+    if (VIEWS.length) rs.append(boxLabel, el("div", { class: "line" }, other, txt));
+    else rs.append(boxLabel, other, txt);
     c.append(el("span", { class: "changed" }));
-    card.append(c, rs);
+    if (!VIEWS.length) card.append(c, rs);
   } else {
     c.append(txt, el("span", { class: "changed" }));
     card.append(c);
   }
-  card._ui = { ok, weak, bad, rs, reasonBoxes, box, boxLabel, txt };
+  card._ui = { ok, weak, bad, rs, reasonBoxes, levelBoxes, box, boxLabel, txt };
   return card;
 }
 
@@ -786,11 +858,11 @@ function rejectedCard(it, i) {
 function saved(i) {
   const it = ITEMS[i];
   return { verdict: it.verdict || "", ref_problem: !!it.ref_problem, reasons: [...(it.reasons || [])],
-           review: it.review || "" };
+           review: it.review || "", views: it.views || "" };
 }
 function current(i) { return changed.get(ITEMS[i].key) || saved(i); }
 const same = (a, b) => a.verdict === b.verdict && a.ref_problem === b.ref_problem && a.review === b.review
-  && a.reasons.join(";") === b.reasons.join(";");
+  && a.reasons.join(";") === b.reasons.join(";") && a.views === b.views;
 function edit(i, patch) {
   if (i < 0 || i >= ITEMS.length || MODE === "rejected") return;
   const next = { ...current(i), ...patch };
@@ -803,7 +875,9 @@ function edit(i, patch) {
   paint(i); updateSubmit();
 }
 function setVerdict(i, v) { edit(i, { verdict: v }); }
-function clearCard(i) { edit(i, { verdict: "", review: "" }); }  // U: the verdict, the reasons and the line
+function clearCard(i) {  // U: the verdict, the reasons and the line; the level goes back to the first one
+  edit(i, { verdict: "", review: "", ...(LEVELS.length ? { views: LEVELS[0][0] } : {}) });
+}
 function tickReason(i, id, on) {
   const now = new Set(current(i).reasons);
   if (on) now.add(id); else now.delete(id);
@@ -821,6 +895,7 @@ function paint(i) {
       b.checked = cur.reasons.includes(id); b.disabled = off; lab.className = off ? "dis" : "";
     }
     ui.box.checked = cur.ref_problem; ui.box.disabled = off; ui.boxLabel.className = off ? "dis" : "";
+    for (const [id, b] of ui.levelBoxes) b.checked = cur.views === id;
   }
   if (document.activeElement !== ui.txt) ui.txt.value = cur.review;
   const notes = [];
@@ -912,7 +987,10 @@ function updateSubmit() {
   const n = sendable().length, waiting = changed.size - n;
   $("submit").disabled = SAVING || n === 0;
   $("submit").textContent = n ? `Submit (${n})` : "Submit";
-  if (!SAVING && waiting) showMsg(`${waiting} with a line but no verdict: choose ${verdictWords()}`, false);
+  if (!SAVING && waiting) {
+    showMsg(`${waiting} with a line${LEVELS.length ? " or a level" : ""} but no verdict: choose ${verdictWords()}`,
+      false);
+  }
   updateFilters();
 }
 
@@ -921,7 +999,7 @@ $("submit").onclick = async () => {
   const body = { mode: MODE, group: GROUP, items: [...sent.entries()].map(([k, c]) => {
     const it = ITEMS.find((x) => x.key === k);
     return { key: k, verdict: c.verdict, ref_problem: c.ref_problem, reasons: c.reasons, review: c.review,
-             loaded_at: it.reviewed_at || "" };
+             loaded_at: it.reviewed_at || "", ...(LEVELS.length ? { views: c.views } : {}) };
   }) };
   SAVING = true; INFLIGHT = sent; updateSubmit(); showMsg("saving...", false);
   const settle = (updated) => {  // drop the changes that are saved now, keep the edits made while saving

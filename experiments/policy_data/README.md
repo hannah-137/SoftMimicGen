@@ -189,10 +189,21 @@ work again every time: run them once per step. (`--replace` without `--reason` o
 7. Review the videos on the review page: the simulator video and the Cosmos video play together, next to the
    reference image. Mark each video Approve (O), Weak (a triangle: usable but weak) or Reject (X); the keys are A,
    W and R. Weak counts as done, like Approve, and review.csv keeps the word weak for later analysis. With Weak or
-   Reject, tick one or more reasons (towel look, towel shape, doubled towel, towel wrinkles, extra object, robot,
-   background, wrist view background, lighting, table, image quality, room and wrist views do not match, reference
-   image problem) or
-   write the reason in the line. A weak or rejected video without a reason is saved but counts as not reviewed until it has one. With
+   Reject, tick one or more reasons or write the reason in the line. The reasons are the review items of the dataset
+   (`review_items` in its `run_config.json`; the lists are in `status.py`):
+   - Version 2 (a dataset made with `--take`): the same nine items for the room view and for the wrist view (towel
+     look, towel shape, table, robot, floor, background, lighting, extra object, image quality), in two columns under
+     the Cosmos video, and "reference image problem". It also has the level "Room and wrist views": same, small
+     difference (usable for robot learning), large difference (for example another background) or not the same (for
+     example another table color). The level is saved with every verdict, also Approve, so videos can be left out
+     by level later. It starts at same; any other level counts as a reason.
+   - Version 1 (a dataset without `review_items` in its `run_config.json`): one list (towel look, towel shape,
+     doubled towel, towel wrinkles, extra object, robot, background, wrist view background, lighting, table, image
+     quality, room and wrist views do not match, reference image problem).
+
+   `make_dataset.py <dataset> --review_items <version>` sets the version; it works only before the first video
+   review of the dataset.
+   A weak or rejected video without a reason is saved but counts as not reviewed until it has one. With
    Reject, tick "reference image problem" when the image is the cause: the video is then made again with a new
    image. The filter bar shows all videos, only O, only Weak, only X, or only the ones not reviewed. Submit saves
    the marks (videos without a verdict are not saved); submit again to change them, and the page shows the saved
@@ -226,8 +237,9 @@ control of `run_cosmos.py` needs the raw depth, so it does not work on a dataset
       demos/, ref_sim/, refs/, refs_rejected/, cosmos/   as in a run folder
       sim_rejected/000-049/demo_NNN_r<k>/  everything of a replaced demo (videos, frame-0 image, reference images,
                                           Cosmos videos) and replaced.json
-      run_config.json                     the takes, every run (relative path and settings), and the fixed values
-                                          of the reference images: variation_seed, tag, max_attempts
+      run_config.json                     the takes, every run (relative path and settings), the fixed values
+                                          of the reference images: variation_seed, tag, max_attempts, and the
+                                          version of the review items: review_items
 
 The list files. Each file has one writer. Every write happens under the dataset lock (`.lists.lock`, see
 `status.py`), so scripts can run at the same time. (The run_config.json of a running Cosmos job is written only by
@@ -242,10 +254,10 @@ its own job.)
 | `refs_rejected/rejected.csv` | make_references.py | images replaced by `--retry`: scores, reason |
 | `cosmos/<run>/run_config.json` | run_cosmos.py | settings of the Cosmos job, the demos it takes and the spec versions |
 | `cosmos/<run>/<group>/<name>.json` | run_cosmos.py | framework settings of one video, and `policy_data`: source demo, reference image and its sha1, seed, prompt, spec version |
-| `review.csv` | review.py | the current verdict of each video (key: `<cosmos run>/<name>`): `approved`, `weak` or `rejected`, reference image problem, reasons (ids joined with `;`, the list is `REASONS` in `status.py`), one line |
+| `review.csv` | review.py | the current verdict of each video (key: `<cosmos run>/<name>`): `approved`, `weak` or `rejected`, reference image problem, reasons (ids joined with `;`; review items version 1: the list `REASONS` in `status.py`; version 2: `<view>_<item>` from `VIEWS` and `VIEW_ITEMS`, for example `room_table`), with version 2 the column `views` (the level of the two views: `same`, `small_difference`, `large_difference`, `not_the_same`), one line |
 | `sim_review.csv` | review.py | the verdict of each simulator demo (demo number and source demo) |
 | `review_history.csv` | review.py | every submitted verdict, with the time |
-| `dataset.csv`, `videos.csv` | status.py | state of every number and every video, with the spec version of each image and video, made new on every run |
+| `dataset.csv`, `videos.csv` | status.py | state of every number and every video, with the spec version of each image and video and the review (with review items version 2 also the column `views`), made new on every run |
 
 States in `dataset.csv`: `conflict` (two images or videos for one number, or a file in the wrong folder: fix by
 hand), `needs_replace`, `needs_ref`, `needs_check` (no check result for the file that is there now), `ref_failed`,
@@ -329,7 +341,7 @@ Folder names are fixed by the scripts. Do not rename them or add words.
   (place type shares, strong light) and the loader of the spec files.
 - `specs/<version>.json` - one file per spec version: the axis lists, the image prompt and model, the Cosmos prompt.
 - `make_dataset.py` - one dataset folder from several runs (`--take`), another demo at a number (`--replace`),
-  more demos after the last number (`--add`).
+  more demos after the last number (`--add`), the version of the review items (`--review_items`).
 - `status.py` - state of a dataset (`dataset.csv`, `videos.csv`) and the next commands; the lock and csv helpers.
 - `review.py` - review page (web server, standard library only): mark videos O, weak or X with reasons, and check
   the simulator demos.

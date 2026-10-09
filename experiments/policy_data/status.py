@@ -30,7 +30,8 @@ the number; the next commands leave such numbers out.
 Every number keeps its place in the ratios (place type, strong light slot), because they come from the number, not
 from the image. A number is done only when its video is approved (or weak, with a reason); nothing is dropped. The
 column review keeps "weak", so weak videos can be counted and left out later. The variation seed, the tag of the
-reference images and max_attempts are fixed per dataset in its run_config.json.
+reference images, max_attempts and the version of the review items (review_items) are fixed per dataset in its
+run_config.json.
 
 It is safe to run at any time, also while other scripts run. Every script that writes a list file or moves a
 tracked file holds the dataset lock (<dataset>/.lists.lock, flock) for a short time; this script takes it too and
@@ -38,8 +39,12 @@ waits while another script holds it. The lock needs a local file system (flock).
 
 This file also holds the helpers that the other scripts import: lock(), lock_fd(), read_csv(), write_csv(),
 append_csv(), write_json(), parse_demos(), ranges(), current_sources(), dataset_config(), file_sha1(),
-check_is_current(), open_hdf5(), stop_signals(), running_cosmos(), cosmos_claims(), reason_ids() and has_reason().
-The review rules are here too: VIDEO_VERDICTS, NEEDS_REASON and REASONS (the reason list of the review page).
+check_is_current(), open_hdf5(), stop_signals(), running_cosmos(), cosmos_claims(), review_items(), reasons_of(),
+columns(), reason_ids(), views_level(), has_reason() and write_lists().
+The review rules are here too: VIDEO_VERDICTS, NEEDS_REASON and the review items of the review page. A dataset has
+one version of them (review_items in its run_config.json). Version 1 is the list REASONS. Version 2 has the same
+items for the room view and for the wrist view (VIEWS, VIEW_ITEMS) and one level for how well the two views match
+(VIEW_LEVELS, the column views of the list files).
 SPEC is the spec version (specs/<version>.json) of new reference images when --spec is not given; row_spec() gives
 the version of a row of refs/references.csv.
 """
@@ -66,6 +71,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SPEC = "v2"  # spec version (specs/<version>.json) of new reference images when --spec is not given
 UNRECORDED_SPEC = "v2"  # images made before refs/references.csv had the column spec (2026-09-29) follow v2
 MAX_ATTEMPTS = 5  # reference images per demo, and videos per demo, before the demo is replaced
+REVIEW_ITEMS = 2  # version of the review items of a new dataset (run_config.json "review_items")
+UNRECORDED_REVIEW_ITEMS = 1  # a dataset from before run_config.json had review_items (2026-10-09) keeps version 1
+REVIEW_ITEM_VERSIONS = (1, 2)
 TAG = "01"  # a dataset has one reference image per demo: demo_NNN_01.png
 VARIATION_SEED = 0  # seed of variations.py for the reference images of a dataset
 LISTS_LOCK = ".lists.lock"  # short: held while a list file is written or a tracked file is moved
@@ -90,8 +98,9 @@ REVIEW_HISTORY_COLUMNS = ["kind", "video", "demo", "name", "source", "verdict", 
                           "reviewed_at"]
 VIDEO_VERDICTS = ["approved", "weak", "rejected"]  # review.csv; weak = usable but weak, it counts as done
 NEEDS_REASON = ("weak", "rejected")  # these verdicts count only with a reason (a reason id, the tick or a line)
-# Reasons for weak or rejected: (id in review.csv, text on the review page). "Reference image problem" is the column
-# ref_problem (a rejected video is then made again with a new reference image), and "other" is the line of text.
+# Review items version 1. Reasons for weak or rejected: (id in review.csv, text on the review page). "Reference image
+# problem" is the column ref_problem (a rejected video is then made again with a new reference image), and "other"
+# is the line of text.
 REASONS = [
     ("towel_look", "Towel color, texture or pattern changed"),
     ("towel_shape", "Towel shape differs from the simulator"),
@@ -107,6 +116,30 @@ REASONS = [
     ("views_differ", "Room and wrist views do not match"),
 ]
 REASON_IDS = [r[0] for r in REASONS]
+# Review items version 2. The reasons for weak or rejected are the same items for each of the two views of a video;
+# the id in review.csv is <view>_<item>, for example room_table. "Reference image problem" and the line of text are
+# as in version 1. The column views holds one level for how well the two views match. It is kept with every verdict,
+# also approved. The first level is the default; any other level counts as a reason.
+VIEWS = [("room", "Room view"), ("wrist", "Wrist view")]
+VIEW_ITEMS = [
+    ("towel_look", "towel look (color, texture, pattern)"),
+    ("towel_shape", "towel shape (differs from the simulator, doubled, wrinkles)"),
+    ("table", "table"),
+    ("robot", "robot"),
+    ("floor", "floor"),
+    ("background", "background"),
+    ("lighting", "lighting"),
+    ("extra_object", "extra object (hand, tag, text)"),
+    ("image_quality", "image quality (blur, smear, flicker)"),
+]
+VIEWS_TITLE = "Room and wrist views"
+VIEW_LEVELS = [
+    ("same", "same"),
+    ("small_difference", "small difference (usable for robot learning)"),
+    ("large_difference", "large difference (for example another background)"),
+    ("not_the_same", "not the same (for example another table color)"),
+]
+VIEW_LEVEL_IDS = [x[0] for x in VIEW_LEVELS]
 STATES = ["conflict", "needs_replace", "needs_ref", "needs_check", "ref_failed", "needs_video", "needs_review",
           "video_rejected", "approved"]
 
@@ -258,12 +291,15 @@ def is_dataset(folder: str) -> bool:
 
 
 def dataset_config(ds: str) -> dict:
-    """run_config.json of a dataset, with the defaults for variation_seed, tag and max_attempts."""
+    """run_config.json of a dataset, with the defaults for variation_seed, tag, max_attempts and review_items."""
     path = f"{ds}/run_config.json"
     cfg = json.load(open(path)) if os.path.isfile(path) else {}
     cfg.setdefault("variation_seed", VARIATION_SEED)
     cfg.setdefault("tag", TAG)
     cfg.setdefault("max_attempts", MAX_ATTEMPTS)
+    cfg.setdefault("review_items", UNRECORDED_REVIEW_ITEMS)
+    if cfg["review_items"] not in REVIEW_ITEM_VERSIONS:
+        sys.exit(f"{path}: review_items is {cfg['review_items']!r}, it must be 1 or 2")
     return cfg
 
 
@@ -402,16 +438,44 @@ def video_id(path: str) -> str:
     return f"{parts[-3]}/{parts[-1][: -len('.mp4')]}"
 
 
-def reason_ids(text: str) -> list:
-    """The known reason ids in the reasons column of review.csv ("a;b"), in the order of REASONS."""
+def review_items(ds: str) -> int:
+    """The version of the review items of a dataset: 1 (the list REASONS) or 2 (the items per view and the level of
+    the two views)."""
+    return dataset_config(ds)["review_items"]
+
+
+def reasons_of(version: int) -> list:
+    """[(reason id, text), ...] of a version of the review items, in the order of the review page."""
+    if version == 1:
+        return REASONS
+    return [(f"{view}_{item}", f"{title}: {text}") for view, title in VIEWS for item, text in VIEW_ITEMS]
+
+
+def columns(base: list, version: int) -> list:
+    """The columns of a list file for a version of the review items: version 2 has the column views after reasons."""
+    if version == 1:
+        return base
+    i = base.index("reasons") + 1
+    return base[:i] + ["views"] + base[i:]
+
+
+def reason_ids(text: str, version: int = 1) -> list:
+    """The known reason ids in the reasons column of review.csv ("a;b"), in the order of the review page."""
     ids = str(text or "").split(";")
-    return [x for x in REASON_IDS if x in ids]
+    return [x for x, _ in reasons_of(version) if x in ids]
 
 
-def has_reason(rev: dict) -> bool:
-    """True when a review.csv row gives a reason: a reason id, the reference image tick, or a line of text."""
-    return bool(reason_ids(rev.get("reasons")) or rev.get("ref_problem") == "1"
-                or str(rev.get("review") or "").strip())
+def views_level(text: str) -> str:
+    """The known level in the views column of review.csv, or "" (no review, or review items version 1)."""
+    return text if text in VIEW_LEVEL_IDS else ""
+
+
+def has_reason(rev: dict, version: int = 1) -> bool:
+    """True when a review.csv row gives a reason: a reason id, the reference image tick, or a line of text. With
+    review items version 2 also a level of the two views other than the first one (same)."""
+    return bool(reason_ids(rev.get("reasons"), version) or rev.get("ref_problem") == "1"
+                or str(rev.get("review") or "").strip()
+                or (version == 2 and views_level(rev.get("views")) in VIEW_LEVEL_IDS[1:]))
 
 
 def row_spec(row: dict) -> str:
@@ -524,6 +588,7 @@ def collect(ds: str) -> tuple[list, list, list]:
     """(rows of dataset.csv, rows of videos.csv, problems). Call it while holding lock(ds)."""
     cfg = dataset_config(ds)
     seed, tag, max_attempts = int(cfg["variation_seed"]), cfg["tag"], int(cfg["max_attempts"])
+    version = cfg["review_items"]
     source_rows = read_csv(f"{ds}/sources.csv")
     n = len(source_rows)
     problems = []
@@ -563,6 +628,10 @@ def collect(ds: str) -> tuple[list, list, list]:
     def video_spec(path: str, meta: dict) -> str:
         return meta.get("spec") or _run_spec(ds, os.path.dirname(os.path.dirname(_rel(ds, path))), run_specs)
 
+    def views_cell(rev: dict) -> dict:
+        """The column views of a row, only with review items version 2."""
+        return {"views": views_level(rev.get("views"))} if version == 2 else {}
+
     for path in rejected_videos:
         m = VIDEO_RE.fullmatch(os.path.basename(path))
         meta = _video_meta(path)
@@ -573,13 +642,14 @@ def collect(ds: str) -> tuple[list, list, list]:
                            "cosmos_run": _rel(ds, path).split(os.sep)[1], "file": _rel(ds, path), "where": "rejected",
                            "source": src or "", "spec": video_spec(path, meta), "verdict": rev.get("verdict", ""),
                            "ref_problem": rev.get("ref_problem", ""),
-                           "reasons": ";".join(reason_ids(rev.get("reasons"))), "review_text": rev.get("review", "")})
+                           "reasons": ";".join(reason_ids(rev.get("reasons"), version)), **views_cell(rev),
+                           "review_text": rev.get("review", "")})
 
     rows = []
     for idx in range(n):
         src = current.get(idx, "")
         name = f"{layout.demo_name(idx)}_{tag}"
-        row = {c: "" for c in DATASET_COLUMNS}
+        row = {c: "" for c in columns(DATASET_COLUMNS, version)}
         row.update(demo=idx, group=layout.chunk(idx), source=src, replaced=replaced.get(idx, 0),
                    refs_rejected=ref_rejected.get(name, 0), place_type=variations.place_type(idx, seed, tag),
                    strong_light=int(variations.strong_light(idx, seed, tag)))
@@ -609,7 +679,7 @@ def collect(ds: str) -> tuple[list, list, list]:
                                "cosmos_run": _rel(ds, path).split(os.sep)[1], "file": _rel(ds, path),
                                "where": "current", "source": meta.get("source") or "", "spec": video_spec(path, meta),
                                "verdict": rev.get("verdict", ""), "ref_problem": rev.get("ref_problem", ""),
-                               "reasons": ";".join(reason_ids(rev.get("reasons"))),
+                               "reasons": ";".join(reason_ids(rev.get("reasons"), version)), **views_cell(rev),
                                "review_text": rev.get("review", "")})
 
         images = refs.get(idx, [])
@@ -637,7 +707,8 @@ def collect(ds: str) -> tuple[list, list, list]:
             rev = reviews.get(video_id(vids[0]), {})
             row["review"] = rev.get("verdict", "")
             row["ref_problem"], row["review_text"] = rev.get("ref_problem", ""), rev.get("review", "")
-            row["reasons"], reason = ";".join(reason_ids(rev.get("reasons"))), has_reason(rev)
+            row["reasons"], reason = ";".join(reason_ids(rev.get("reasons"), version)), has_reason(rev, version)
+            row.update(views_cell(rev))
 
         if row["sim_review"] == "rejected":
             state = "needs_replace"
@@ -660,6 +731,13 @@ def collect(ds: str) -> tuple[list, list, list]:
         row["state"] = state
         rows.append(row)
     return rows, video_rows, problems
+
+
+def write_lists(ds: str, rows: list, video_rows: list) -> None:
+    """Write dataset.csv and videos.csv from the rows of collect(). Call it while holding lock(ds)."""
+    version = review_items(ds)
+    write_csv(f"{ds}/dataset.csv", rows, columns(DATASET_COLUMNS, version))
+    write_csv(f"{ds}/videos.csv", video_rows, columns(VIDEO_COLUMNS, version))
 
 
 def _why_replace(row: dict, max_attempts: int) -> str:
@@ -739,8 +817,7 @@ def update(ds: str, ds_arg: str | None = None, quiet: bool = False) -> dict:
         sys.exit(f"{ds} is not a dataset folder (no sources.csv): make one with make_dataset.py --take")
     with lock(ds):
         rows, video_rows, problems = collect(ds)
-        write_csv(f"{ds}/dataset.csv", rows, DATASET_COLUMNS)
-        write_csv(f"{ds}/videos.csv", video_rows, VIDEO_COLUMNS)
+        write_lists(ds, rows, video_rows)
     counts = collections.Counter(r["state"] for r in rows)
     if quiet:
         return counts

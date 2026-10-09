@@ -1,10 +1,12 @@
-"""Make one dataset folder from the demos of several runs, replace a demo in it, and add demos to it.
+"""Make one dataset folder from the demos of several runs, replace a demo in it, add demos to it, and set its
+review items.
 
   python experiments/policy_data/make_dataset.py --take <run>:<N> [<run>:<N> ...] [--out <folder>] [--name <name>]
       [--skip_raw <kind> ...]
   python experiments/policy_data/make_dataset.py <dataset_dir> --replace <demo> --reason "<text>" [--from <run>]
       [--runs_dir <folder>]
   python experiments/policy_data/make_dataset.py <dataset_dir> --add <run>:<N> [<run>:<N> ...] [--runs_dir <folder>]
+  python experiments/policy_data/make_dataset.py <dataset_dir> --review_items <version>
 
 --take takes the first N demos of each run whose towel stays inside the room image in every frame, in the order
 given, and numbers them 0, 1, 2, ... Each run needs <run>/check_towel_in_view.csv first:
@@ -17,8 +19,9 @@ the name instead: the folder is <out>/<name>/ and the hdf5 is <name>.hdf5. Use i
   demos/, ref_sim/                    videos and frame-0 images, as hard links with the new numbers (no extra space;
                                       a copy when a hard link is not possible, for example on another disk)
   sources.csv                         demo number -> source run and demo, seed, room camera noise, steps
-  run_config.json                     the takes, every run (relative path and its settings), and the fixed values
-                                      for the reference images: variation_seed 0, tag 01, max_attempts 5
+  run_config.json                     the takes, every run (relative path and its settings), the fixed values
+                                      for the reference images: variation_seed 0, tag 01, max_attempts 5, and
+                                      the version of the review items of the review page: review_items 2
 All runs must have the same task, cameras, image size, video frames and simulation settings, and different seeds
 (the same seed repeats the start poses). The runs can number the instance ids differently, so every demo keeps the
 table of its run in the attribute instance_ids of data/demo_N (json: camera -> id -> prim path), next to source_run
@@ -62,6 +65,12 @@ the end of a group when the shares matter. Like --replace, --add waits for make_
 only one of them runs on a dataset at a time. When it stops before it prints "added demos", run the same command
 again: it goes on with the demos that are not copied yet. Then make the reference images and the videos of the new
 numbers as for the others.
+
+--review_items sets the version of the review items of a dataset (review_items in run_config.json): 1 = one list of
+reasons, 2 = the same items for the room view and for the wrist view, and a level for how well the two views match
+(the lists are in status.py). A dataset made with --take has version 2; a dataset without the value in its
+run_config.json has version 1. The version can change only while review.csv has no video review, so the reviews of a
+dataset never mix two lists. Reload the review page after the change.
 """
 
 import argparse
@@ -366,6 +375,7 @@ def take(args) -> None:
                 "task": first.cfg["task"], "n_demos": total, "hdf5": f"{stem}.hdf5",
                 "created": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "git_commit": git_commit(),
                 "variation_seed": status.VARIATION_SEED, "tag": status.TAG, "max_attempts": status.MAX_ATTEMPTS,
+                "review_items": status.REVIEW_ITEMS,
                 "skip_raw": skip_raw, "takes": [{"run": r.name, "n": n} for r, n in specs],
                 "runs": {r.name: {"path": os.path.relpath(r.path, final), "config": r.config()} for r, _ in specs}})
             os.rename(tmp, final)
@@ -730,9 +740,26 @@ def add(args) -> None:
     status.update(ds)
 
 
+def set_review_items(args) -> None:
+    ds = os.path.abspath(args.dataset_dir)
+    if not status.is_dataset(ds):
+        sys.exit(f"{ds} is not a dataset folder (no sources.csv)")
+    with status.lock(ds):
+        old = status.review_items(ds)
+        reviewed = len(status.read_csv(f"{ds}/review.csv"))
+        if reviewed and args.review_items != old:
+            sys.exit(f"{ds} has {reviewed} video reviews (review.csv) with review items version {old}: the version "
+                     "can change only before the first video review")
+        cfg = json.load(open(f"{ds}/run_config.json"))
+        cfg["review_items"] = args.review_items
+        status.write_json(f"{ds}/run_config.json", cfg)
+    print(f"review items of {os.path.relpath(ds)}: version {old} -> {args.review_items}. Reload the review page.")
+    status.update(ds)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("dataset_dir", nargs="?", help="dataset folder (for --replace and --add)")
+    ap.add_argument("dataset_dir", nargs="?", help="dataset folder (for --replace, --add and --review_items)")
     ap.add_argument("--take", nargs="+", metavar="RUN:N", help="make a new dataset from these runs")
     ap.add_argument("--out", default=None, help="folder for the new dataset (default: the folder of the first run)")
     ap.add_argument("--name", default=None, help="with --take: name of the dataset folder and of its hdf5 "
@@ -747,20 +774,27 @@ def main():
                     help="with --replace: drop a replace that stopped before the new demo was linked")
     ap.add_argument("--add", nargs="+", metavar="RUN:N", help="put the next N unused demos of these runs after the "
                     "last demo of the dataset")
+    ap.add_argument("--review_items", type=int, choices=status.REVIEW_ITEM_VERSIONS, default=None,
+                    metavar="VERSION", help="set the version of the review items of the dataset (1 or 2), only "
+                    "before its first video review")
     args = ap.parse_args()
     if args.name and not args.take:
         ap.error("--name is for --take only")
     if args.skip_raw and not args.take:
         ap.error("--skip_raw is for --take only (--add and --replace follow run_config.json of the dataset)")
+    if args.review_items is not None and (args.take or args.add or args.replace is not None):
+        ap.error("--review_items goes alone: <dataset_dir> --review_items VERSION")
     if args.take and args.replace is None and not args.add and not args.dataset_dir:
         take(args)
     elif args.dataset_dir and args.replace is not None and not args.take and not args.add:
         replace(args)
     elif args.dataset_dir and args.add and args.replace is None and not args.take:
         add(args)
+    elif args.dataset_dir and args.review_items is not None:
+        set_review_items(args)
     else:
         ap.error("use --take RUN:N ..., or <dataset_dir> --replace DEMO --reason TEXT, or <dataset_dir> --add "
-                 "RUN:N ...")
+                 "RUN:N ..., or <dataset_dir> --review_items VERSION")
 
 
 if __name__ == "__main__":

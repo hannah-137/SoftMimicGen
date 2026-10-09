@@ -79,7 +79,7 @@ Axes (every image changes all 7 at once):
 | Reference | the reference image as frame 0 |
 | Output | 81 frames, 16 fps, 1024x512. With `run_cosmos.py --all_steps`: every step of the demo (131 to 133 frames for the Franka towel task), made in one chunk and stored at the control rate of the simulator (20 fps) |
 | Settings | 35 steps, guidance 3, control guidance 3, shift 5, seed 0 (a new seed when a video is made again) |
-| Review | a person marks every video approved, weak or rejected; weak and rejected need at least one reason; at most 5 videos per demo |
+| Review | a person marks every video approved, weak or rejected; weak and rejected need at least one reason; at most 5 videos per demo. The reasons are per view (room, wrist): towel look, towel shape, table, robot, floor, background, lighting, extra object, image quality. Every video also gets a level for how well the two views match: same, small difference, large difference, not the same (review items version 2; a dataset from before 2026-10-09 has version 1, one list of reasons) |
 
 ## Change history
 
