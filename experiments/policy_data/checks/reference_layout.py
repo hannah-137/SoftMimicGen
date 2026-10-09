@@ -64,7 +64,9 @@ The sim mask is only a prior. The check looks for the true boundary in the refer
   table, below its back edge). A block of the wrist table is floor-like when it is clearly nearer to the floor look
   than to the table look (lightness after the offset between the views, color, fine texture). The largest
   connected group of such blocks counts. Known limits: a floor that looks like the table, a drawn surface that
-  does not look like the room floor, and strips thinner than about 20 px.
+  does not look like the room floor, strips thinner than about 20 px, and a floor on more than about half of the
+  wrist table when it differs from the table mainly in lightness (the offset between the views then comes from the
+  floor).
 
 Pass rule (see check()): the image fails when
   - the towel (both views), the table (both views) or the robot (wrist view) is more than N_PX = 8 px off (p95 of
@@ -72,7 +74,8 @@ Pass rule (see check()): the image fails when
   - a table edge with sim ground outside is missing, or no table edge at all is found in a view with void edges, or
   - a foreign patch covers more than PATCH_MAX = 5 % of the table top or of the towel, or
   - the table top looks different in the two views, or
-  - one part of the wrist table, at least FLOOR_MAX = 1.2 % of it, looks like the floor of the room view.
+  - one part of the wrist table, at least FLOOR_MAX = 1.2 % of it and FL_GROUP_MIN = 4 blocks, looks like the floor
+    of the room view.
 A boundary that cannot be measured is not a failure. Needs numpy and opencv-python.
 """
 
@@ -160,12 +163,13 @@ FL_KNN = 3          # the distance to a look is the mean over this many nearest 
 FL_MARGIN = 2.0     # a block is floor-like when it is this much nearer to the floor look than to the table look
 FL_REF_MIN = 5      # blocks needed for each look of the room view, else the test does not run
 FL_GAP = 8          # px: the floor zone of the room view keeps this distance from the sim objects
+FL_GROUP_MIN = 4    # blocks: a smaller group of floor-like blocks does not count
 
 # pass rule
 N_PX = 8            # px: a boundary may lie this far from the sim boundary (p95), and 2 * N_PX + 2 at one place
 PATCH_MAX = 0.05    # a foreign patch may cover this share of the interior
 MIN_AREA = 400      # px: smaller objects are skipped
-LOOK_MIN_PX = 2000  # px of interior needed in each view for the interior check and the table look test
+LOOK_MIN_PX = 2000  # px of interior needed in each view for the interior check, the table look and the floor look tests
 LOOK_DL = 20.0      # table look, max difference between the views: lightness (L of Lab, 0..100)
 LOOK_DC = 12.0      # ... color (a, b of Lab)
 LOOK_DTEX = 0.5     # ... fine texture (log scale)
@@ -1186,7 +1190,7 @@ def floor_look(room, room_view, room_interior, wrist, wrist_interior):
     room, wrist: the two halves of the reference image. The room view gives the table look (room_interior) and
     the floor look (floor_zone). A wrist block is floor-like when it is FL_MARGIN nearer to the floor look than to
     the table look. The share is the largest connected group of floor-like blocks over all wrist blocks.
-    Returns (0.0, None) when a look cannot be measured."""
+    Returns (0.0, None) when a look cannot be measured, or when no group has FL_GROUP_MIN blocks."""
     Fw, Fr = pixel_looks(wrist), pixel_looks(room)
     cells, wrist_looks = block_looks(Fw, wrist_interior)
     _, table = block_looks(Fr, room_interior)
@@ -1202,6 +1206,8 @@ def floor_look(room, room_view, room_interior, wrist, wrist_interior):
     if n < 2:
         return 0.0, None
     k = 1 + int(stats[1:, cv2.CC_STAT_AREA].argmax())
+    if stats[k, cv2.CC_STAT_AREA] < FL_GROUP_MIN:
+        return 0.0, None
     region = np.zeros(wrist_interior.shape, bool)
     for r, c in cells[labels[cells[:, 0], cells[:, 1]] == k]:
         region[r * FL_BLOCK:(r + 1) * FL_BLOCK, c * FL_BLOCK:(c + 1) * FL_BLOCK] = True
@@ -1308,9 +1314,9 @@ def check(ref, views):
         if dL > LOOK_DL or dC > LOOK_DC or dT > LOOK_DTEX:
             reasons.append(f"table: room and wrist views differ (lightness {dL:.0f}, color {dC:.0f}, texture {dT:.2f})")
     if len(tables) == 2:  # floor drawn on the wrist table
-        share, region = floor_look(*tables["room"][:1], views["room"], tables["room"][1], *tables["wrist"])
+        share, region = floor_look(tables["room"][0], views["room"], tables["room"][1], *tables["wrist"])
         if share >= FLOOR_MAX:
-            reasons.append(f"wrist table: looks like the room floor on {100 * share:.0f} % of it")
+            reasons.append(f"wrist table: looks like the room floor on {100 * share:.1f} % of it")
             found[("wrist", "floor")] = region
     return reasons, found
 

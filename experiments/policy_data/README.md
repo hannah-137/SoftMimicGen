@@ -172,8 +172,8 @@ work again every time: run them once per step. (`--replace` without `--reason` o
    hdf5, so the frames and the actions match one to one. The script writes the control video and the simulator video
    with every step into the demo folder (`demo_NNN_geoedge_all.mp4`, `demo_NNN_source_all.mp4`); the 81-frame videos
    stay. The finished video is stored at the control rate of the simulator (20 fps). The review page shows the
-   simulator video with every step next to it. It works with the edge control alone (spec versions up to v6, and v9). Use
-   one kind of video in a dataset.
+   simulator video with every step next to it. It works with the edge control alone (spec versions up to v6, and
+   v9). Use one kind of video in a dataset.
 
    Steps 5 and 6 for many groups: `run_queue.py` does them group by group (images, check, retry, Cosmos). It makes
    the images of the next group while Cosmos runs, so the GPUs do not wait between groups, and it waits for a
