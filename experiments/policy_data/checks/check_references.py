@@ -19,7 +19,9 @@ object in the image and fails the image when
   - the towel or the table (both views) or the robot (wrist view) is more than 8 px off, or
   - a table edge is missing, or
   - another surface covers more than 5 % of the table top or of the towel, or
-  - the table top looks different in the room view and in the wrist view.
+  - the table top looks different in the room view and in the wrist view, or
+  - a part of the wrist table looks like the floor of the room view (the image shows floor where the simulator shows
+    the table).
 A boundary that cannot be measured is not a failure. The check takes about 4 s per image on one CPU core;
 --workers images are checked at the same time.
 The instance id table comes from the attribute instance_ids of data/demo_N (a dataset made by make_dataset.py: runs
@@ -29,11 +31,11 @@ dataset made with --skip_raw normals).
 
 Output, in the refs folder: check_references.csv (one row per image, with the sha1 of the checked file, so a later
 image with the same name counts as not checked). Only when something fails: failed_references.txt (images to make
-again, with the reason) and check_<name>.png next to the image (the image with the simulator outlines in red and
-the outlines found in the image in green). The columns room_score and wrist_score are empty: they belong to the
-earlier layout check and stay for the old rows. Rows of other demos are kept only while they still describe the
-file on disk. Exit code 1 when anything checked in this run fails. Both files are written under the dataset lock
-(see status.py); in a dataset folder, status.py runs at the end.
+again, with the reason) and check_<name>.png next to the image (the image with the simulator outlines in red, the
+outlines found in the image in green, and a floor-like part of the wrist table in blue). The columns room_score and
+wrist_score are empty: they belong to the earlier layout check and stay for the old rows. Rows of other demos are
+kept only while they still describe the file on disk. Exit code 1 when anything checked in this run fails. Both
+files are written under the dataset lock (see status.py); in a dataset folder, status.py runs at the end.
 """
 
 import argparse

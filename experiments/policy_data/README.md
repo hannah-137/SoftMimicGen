@@ -85,8 +85,9 @@ or `demo_NNN.png`. Then check them, then run:
         --checkpoint <Cosmos3-Super-fp8> --hf_home <hf cache> --gpus 2,3 --cp 2
 
 The check rejects images that are not 2:1. It also checks the layout (`checks/reference_layout.py`): the table, the
-towel and the robot must have the shape, size and position of simulator frame 0 (within 8 px), and the table top
-must look the same in both views. It takes about 4 s per image on one CPU core (`--workers 4` by default).
+towel and the robot must have the shape, size and position of simulator frame 0 (within 8 px), the table top
+must look the same in both views, and no part of the wrist table may look like the floor of the room view. It takes
+about 4 s per image on one CPU core (`--workers 4` by default).
 When something fails, `failed_references.txt` lists the images to make again. `--retry` makes at most 5 images per
 demo (`--max_attempts`). Images that were never made (for example after an API error) are made by the same command
 without `--retry`. In a run folder, `run_cosmos.py` only starts when every reference passed; in a dataset folder
@@ -171,7 +172,7 @@ work again every time: run them once per step. (`--replace` without `--reason` o
    hdf5, so the frames and the actions match one to one. The script writes the control video and the simulator video
    with every step into the demo folder (`demo_NNN_geoedge_all.mp4`, `demo_NNN_source_all.mp4`); the 81-frame videos
    stay. The finished video is stored at the control rate of the simulator (20 fps). The review page shows the
-   simulator video with every step next to it. It works with the edge control alone (spec versions up to v6). Use
+   simulator video with every step next to it. It works with the edge control alone (spec versions up to v6, and v9). Use
    one kind of video in a dataset.
 
    Steps 5 and 6 for many groups: `run_queue.py` does them group by group (images, check, retry, Cosmos). It makes
