@@ -34,6 +34,9 @@ demos, failed demos in <output>_failed.hdf5). This script only changes:
                   axis), turn every warped rotation by 180 degrees about that axis instead. The fingers are
                   symmetric, so the grasp is the same, and the hand does not turn around (joint 7 limit). Use it
                   with a 180 center. A run with these options draws more random numbers, so it needs its own seed.
+  --object_scale  scale of the object USD at spawn (default 1 = the task's own size). The same USD and the same
+                  nodes, only smaller or larger, so the source demos stay usable: the warp maps them to the new
+                  size. For the towel, 0.6 gives 0.42 x 0.24 m instead of 0.70 x 0.40 m.
 
 and it records extra observations for both cameras (see observations.py):
 
@@ -81,6 +84,7 @@ parser.add_argument("--ground", choices=["upstream", "plain"], default="upstream
 parser.add_argument("--object_yaw_centers", type=float, nargs="+", default=None, help="Start yaw of the object: one of these centers per demo (degrees) plus the noise. Default: the task's own yaw range.")
 parser.add_argument("--object_yaw_noise", type=float, default=None, help="Noise around the yaw center, uniform +- degrees (default: the task's own yaw range).")
 parser.add_argument("--hand_yaw_mod_180", action="store_true", default=False, help="Turn the warped hand by 180 degrees about its z axis when it would turn by more than 90 degrees (symmetric fingers).")
+parser.add_argument("--object_scale", type=float, default=1.0, help="Scale of the object USD at spawn (default 1 = the task's own size).")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
@@ -190,6 +194,12 @@ def configure(env_cfg, args) -> None:
     room = term_prefix(args.room_camera)
     getattr(env_cfg.scene, args.room_camera).update_latest_camera_pose = True  # else a fixed camera keeps its first pose in data
     setattr(policy, f"{room}_camera_pose", ObservationTermCfg(func=observations.camera_pose, params={"sensor_cfg": SceneEntityCfg(args.room_camera)}))
+    if args.object_scale != 1.0:
+        obj = getattr(env_cfg.scene, "object", None)
+        if obj is None or not hasattr(obj.spawn, "scale"):
+            raise SystemExit("[policy_data] --object_scale: this task has no object spawned from a USD file")
+        obj.spawn.scale = (args.object_scale,) * 3
+        print(f"[policy_data] object: scale {args.object_scale} (same USD, same nodes)")
     if args.object_yaw_centers is not None:
         term = getattr(env_cfg.events, "reset_object_position", None)
         if term is None or getattr(term.func, "__name__", "") != "reset_nodal_state_uniform":

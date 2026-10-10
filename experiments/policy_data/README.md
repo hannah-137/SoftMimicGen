@@ -22,6 +22,8 @@ made with Cosmos3. Needs only upstream SoftMimicGen and this folder.
   fingers are symmetric, so the grasp is the same, and joint 7 stays in its range. Use both options together.
   The drawn yaw of every demo is in `obs/object_start_yaw` (degrees) and in `sources.csv`. Such a run draws
   more random numbers, so it needs its own seed. Default: the task's own yaw range, as before.
+- `--object_scale 0.6` spawns the towel USD at 0.6 of its size (0.42 x 0.24 m instead of 0.70 x 0.40 m). Same
+  USD and same nodes, so the source demos stay usable; the warp maps them to the new size. Default 1.
 - `--table clean_top` uses the table of the task without its metal parts (the beam and the post beside the table,
   the handles, the bolts) and with the bolt holes in the top closed. The top itself is the upstream one: same
   material, size and place. `--table wide_top` is `clean_top` with a wider top: 0.60 m more toward the room camera
