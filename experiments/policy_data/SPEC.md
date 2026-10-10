@@ -19,6 +19,7 @@ shares, strong light slots) are in `variations.py`.
 | Rendering mode | the balanced preset of Isaac Lab (demos 000-749 and the spare runs of seeds 1 and 4). New demos: quality, the default of `make_demos.sh` since 2026-10-09 (`--rendering_mode`) |
 | Seed 1 | 50 demos, fixed room camera (dataset demos 000-049) |
 | Seeds 2 and 3 | 350 demos each, room camera moved once per demo: uniform, +-5 cm and +-5 degrees on each axis, towel fully in view at the start |
+| Fold direction | left to right in the room image: the towel starts with a yaw of -30..+30 degrees (demos 000-749). Option `--object_yaw_centers 0 180 --hand_yaw_mod_180` for new demos: half of them start with the towel turned by 180 degrees and fold from right to left; the start yaw of every demo is in `sources.csv` |
 | Towel in view | the towel stays inside the room image in every frame (`checks/check_towel_in_view.py`); other demos are not used |
 | Spares | more demos than needed per seed (for example 390); `make_dataset.py --replace` takes the next spare, `--add` puts unused demos after the last number of the dataset |
 | Recorded | RGB, geoedge, raw depth, normals and instance ids for both cameras; the room camera pose of every step |

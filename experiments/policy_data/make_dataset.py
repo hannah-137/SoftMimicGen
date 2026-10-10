@@ -18,7 +18,8 @@ the name instead: the folder is <out>/<name>/ and the hdf5 is <name>.hdf5. Use i
   <task>_n<total>_seeds<seeds>.hdf5   the demos, copied. The runs keep theirs: --replace takes spare demos there.
   demos/, ref_sim/                    videos and frame-0 images, as hard links with the new numbers (no extra space;
                                       a copy when a hard link is not possible, for example on another disk)
-  sources.csv                         demo number -> source run and demo, seed, room camera noise, steps
+  sources.csv                         demo number -> source run and demo, seed, room camera noise, steps,
+                                      object yaw setting of the run and the start yaw of the demo (degrees)
   run_config.json                     the takes, every run (relative path and its settings), the fixed values
                                       for the reference images: variation_seed 0, tag 01, max_attempts 5, and
                                       the version of the review items of the review page: review_items 2
@@ -283,10 +284,18 @@ def copy_demo(src: h5py.File, run: Run, s: int, data: h5py.Group, key: str, skip
     return int(g.attrs.get("num_samples", g["actions"].shape[0]))
 
 
-def source_row(i: int, run: Run, s: int, steps: int) -> dict:
+def start_yaw(g: h5py.Group):
+    """Start yaw of the object in degrees from obs/object_start_yaw of a demo (runs with --object_yaw_centers),
+    else an empty string."""
+    return round(float(g["obs/object_start_yaw"][0, 0]), 1) if "obs/object_start_yaw" in g else ""
+
+
+def source_row(i: int, run: Run, s: int, steps: int, yaw="") -> dict:
     return {"demo": i, "source_run": run.name, "source_demo": s, "seed": run.cfg.get("seed", ""),
             "camera_noise_pos_m": run.cfg.get("camera_noise_pos_m", 0.0),
-            "camera_noise_rot_deg": run.cfg.get("camera_noise_rot_deg", 0.0), "steps": steps}
+            "camera_noise_rot_deg": run.cfg.get("camera_noise_rot_deg", 0.0), "steps": steps,
+            "object_yaw_centers_deg": " ".join(str(c) for c in run.cfg.get("object_yaw_centers_deg") or []),
+            "hand_yaw_mod_180": run.cfg.get("hand_yaw_mod_180", False), "object_start_yaw_deg": yaw}
 
 
 def git_commit() -> str:
@@ -365,7 +374,7 @@ def take(args) -> None:
                             steps_total += steps
                             a, b = link_files(run, s, tmp, i)
                             linked, copied = linked + a, copied + b
-                            rows.append(source_row(i, run, s, steps))
+                            rows.append(source_row(i, run, s, steps, start_yaw(data[f"demo_{i}"])))
                             print(f"{layout.demo_name(i)} <- {run.name} demo {s} ({i + 1}/{total}, "
                                   f"{time.time() - t0:.0f} s)", flush=True)
                 data.attrs["total"] = total_steps(data)
@@ -608,7 +617,7 @@ def replace(args) -> None:
                 data.attrs["total"] = total_steps(data)
                 steps = int(data[key].attrs.get("num_samples", 0))
                 sources = status.read_csv(f"{ds}/sources.csv")
-                sources[n] = source_row(n, run, s, steps)
+                sources[n] = source_row(n, run, s, steps, start_yaw(data[key]))
                 status.write_csv(f"{ds}/sources.csv", sources, status.SOURCE_COLUMNS)
                 cfg_now = json.load(open(f"{ds}/run_config.json"))
                 if run.name not in cfg_now.setdefault("runs", {}):

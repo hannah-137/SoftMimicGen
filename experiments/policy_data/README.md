@@ -15,6 +15,13 @@ made with Cosmos3. Needs only upstream SoftMimicGen and this folder.
   +-5 cm on each axis and +-5 degrees on each axis). A draw is kept only when the whole towel is inside the image
   at the start (a small margin); otherwise the generator draws again. Default 0 = fixed camera. The wrist camera
   never changes. The room camera pose of every step is in `obs/agentview_camera_pose` (x, y, z, qw, qx, qy, qz).
+- `--object_yaw_centers 0 180` draws the start yaw of the towel per demo from these centers (equal chance) plus
+  the task's own noise (+-30 degrees; `--object_yaw_noise` changes it). With 180 the towel starts turned around,
+  so the robot grasps the other end and folds from right to left in the room image. The warp of SoftMimicGen
+  follows the towel on its own. `--hand_yaw_mod_180` keeps the hand from turning around with the towel: the
+  fingers are symmetric, so the grasp is the same, and joint 7 stays in its range. Use both options together.
+  The drawn yaw of every demo is in `obs/object_start_yaw` (degrees) and in `sources.csv`. Such a run draws
+  more random numbers, so it needs its own seed. Default: the task's own yaw range, as before.
 - `--table clean_top` uses the table of the task without its metal parts (the beam and the post beside the table,
   the handles, the bolts) and with the bolt holes in the top closed. The top itself is the upstream one: same
   material, size and place. `--table wide_top` is `clean_top` with a wider top: 0.60 m more toward the room camera

@@ -22,6 +22,18 @@ demos, failed demos in <output>_failed.hdf5). This script only changes:
                   the grid lines as tiles, rails and pipes).
   --rendering_mode  performance, balanced or quality: the renderer preset of Isaac Lab (its own option). Without
                   it Isaac Lab uses balanced. make_demos.sh passes quality unless another mode is given.
+  --object_yaw_centers DEG [DEG ...]
+                  start yaw of the object: one of these centers per demo (equal chance) plus the noise below.
+                  "0 180" gives the upstream start or the object turned by 180 degrees; for the towel the robot
+                  then grasps the other end and folds from the other side. The warp of SoftMimicGen follows the
+                  object on its own. Default: the task's own yaw range (franka_towel: -30..+30 degrees).
+  --object_yaw_noise DEG
+                  noise around the center, uniform +-DEG (default: the task's own yaw range)
+  --hand_yaw_mod_180
+                  when the warped hand would turn by more than 90 degrees about its own z axis (the approach
+                  axis), turn every warped rotation by 180 degrees about that axis instead. The fingers are
+                  symmetric, so the grasp is the same, and the hand does not turn around (joint 7 limit). Use it
+                  with a 180 center. A run with these options draws more random numbers, so it needs its own seed.
 
 and it records extra observations for both cameras (see observations.py):
 
@@ -31,6 +43,7 @@ and it records extra observations for both cameras (see observations.py):
   <camera>_instance_raw   (H, W, 1) int32                raw instance id
 
   <room>_camera_pose      (7,) float32                   room camera pose in the world frame: x, y, z, qw, qx, qy, qz
+  object_start_yaw        (1,) float32, degrees          start yaw of the object (only with --object_yaw_centers)
 
 <camera> is the camera name without "_image". The instance id table is saved next to the hdf5 as
 <output>_instance_ids.json. Run inside the SoftMimicGen environment from the repository root. make_demos.sh
@@ -39,6 +52,7 @@ wraps this script.
 
 import argparse
 import json
+import math
 import os
 import sys
 
@@ -64,6 +78,9 @@ parser.add_argument("--camera_noise_pos", type=float, default=0.0, help="Room ca
 parser.add_argument("--camera_noise_rot", type=float, default=0.0, help="Room camera: random rotation per demo, +- degrees on each axis.")
 parser.add_argument("--table", choices=["upstream", "clean_top", "wide_top"], default="upstream", help="Table: the upstream asset, the same table with a clean top, or with a clean and wider top (see table.py).")
 parser.add_argument("--ground", choices=["upstream", "plain"], default="upstream", help="Ground: the grid floor of the task, or a flat floor of one plain gray color without grid lines.")
+parser.add_argument("--object_yaw_centers", type=float, nargs="+", default=None, help="Start yaw of the object: one of these centers per demo (degrees) plus the noise. Default: the task's own yaw range.")
+parser.add_argument("--object_yaw_noise", type=float, default=None, help="Noise around the yaw center, uniform +- degrees (default: the task's own yaw range).")
+parser.add_argument("--hand_yaw_mod_180", action="store_true", default=False, help="Turn the warped hand by 180 degrees about its z axis when it would turn by more than 90 degrees (symmetric fingers).")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
@@ -94,6 +111,7 @@ import softmimicgen.envs  # noqa: F401, E402
 
 if args_cli.enable_pinocchio:
     import softmimicgen.envs.pinocchio_envs  # noqa: F401
+from softmimicgen.datagen import data_generator  # noqa: E402
 from softmimicgen.datagen.generation import env_loop, setup_async_generation, setup_env_config  # noqa: E402
 from softmimicgen.datagen.utils import get_env_name_from_dataset, setup_output_paths  # noqa: E402
 
@@ -114,8 +132,30 @@ def term_prefix(camera: str) -> str:
     return camera[: -len("_image")] if camera.endswith("_image") else camera
 
 
+def hand_yaw_mod_180(warp):
+    """Wrap the TPS warp of the data generator (--hand_yaw_mod_180). The warp turns the hand with the object. When
+    the first pose of a segment would turn by more than 90 degrees about the hand z axis (the approach axis), every
+    rotation of the segment is turned by 180 degrees about that axis instead. The Franka fingers are symmetric, so
+    the grasp is the same. The hand then stays near its source orientation, and the arm does not turn the hand
+    around (joint 7 limit at a 180 degree object yaw)."""
+    flip = torch.diag(torch.tensor([-1.0, -1.0, 1.0]))
+
+    def warped(*args, **kwargs):
+        poses = warp(*args, **kwargs)
+        src = kwargs["src_eef_poses"] if "src_eef_poses" in kwargs else args[0]
+        rel = src[0, :3, :3].T @ poses[0, :3, :3]  # source hand -> warped hand, in the source hand frame
+        turn = math.degrees(math.atan2(rel[1, 0].item(), rel[0, 0].item()))
+        if abs(turn) > 90.0:
+            poses = poses.clone()
+            poses[:, :3, :3] = poses[:, :3, :3] @ flip.to(poses)
+        print(f"[policy_data] hand yaw mod 180: hand turn {turn:+.0f} deg -> {'turned by 180' if abs(turn) > 90.0 else 'kept'}", flush=True)
+        return poses
+
+    return warped
+
+
 def configure(env_cfg, args) -> None:
-    """Set the cameras and add the observation terms. Nothing else in the scene changes."""
+    """Set the cameras, the observation terms and the scene options (object start yaw, table, ground)."""
     for name in (args.room_camera, args.wrist_camera):
         cam = getattr(env_cfg.scene, name, None)
         if cam is None:
@@ -150,6 +190,24 @@ def configure(env_cfg, args) -> None:
     room = term_prefix(args.room_camera)
     getattr(env_cfg.scene, args.room_camera).update_latest_camera_pose = True  # else a fixed camera keeps its first pose in data
     setattr(policy, f"{room}_camera_pose", ObservationTermCfg(func=observations.camera_pose, params={"sensor_cfg": SceneEntityCfg(args.room_camera)}))
+    if args.object_yaw_centers is not None:
+        term = getattr(env_cfg.events, "reset_object_position", None)
+        if term is None or getattr(term.func, "__name__", "") != "reset_nodal_state_uniform":
+            raise SystemExit("[policy_data] --object_yaw_centers: this task has no reset event reset_object_position with reset_nodal_state_uniform")
+        pose_range = dict(term.params["pose_range"])
+        if args.object_yaw_noise is None:
+            noise = tuple(math.degrees(v) for v in pose_range.get("yaw", (0.0, 0.0)))
+        else:
+            noise = (-args.object_yaw_noise, args.object_yaw_noise)
+        env_cfg.events.reset_object_position = EventTermCfg(  # same place in the event order as before
+            func=events.reset_nodal_state_yaw_centers,
+            mode="reset",
+            params={"yaw_centers_deg": list(args.object_yaw_centers), "yaw_noise_deg": noise, "pose_range": pose_range,
+                    "velocity_range": term.params.get("velocity_range", {}),
+                    "asset_cfg": term.params.get("asset_cfg", SceneEntityCfg("object"))},
+        )
+        policy.object_start_yaw = ObservationTermCfg(func=observations.object_start_yaw)
+        print(f"[policy_data] object start yaw: centers {args.object_yaw_centers} deg, noise {noise[0]:+.1f}..{noise[1]:+.1f} deg")
     if args.camera_noise_pos > 0 or args.camera_noise_rot > 0:
         env_cfg.events.randomize_room_camera = EventTermCfg(
             func=events.randomize_camera_pose,
@@ -200,6 +258,11 @@ def main():
     )
     env_cfg.datagen_config.seed = args_cli.seed
     configure(env_cfg, args_cli)
+    if args_cli.hand_yaw_mod_180:
+        data_generator.transform_source_data_segment_using_nodal_registration = hand_yaw_mod_180(
+            data_generator.transform_source_data_segment_using_nodal_registration
+        )
+        print("[policy_data] hand yaw mod 180: on")
 
     env = gym.make(env_name, cfg=env_cfg).unwrapped
     if not isinstance(env, ManagerBasedRLMimicEnv):

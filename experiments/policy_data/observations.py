@@ -1,4 +1,5 @@
-"""Observation terms for the camera images: geometry edges and raw renderer outputs.
+"""Observation terms for the camera images (geometry edges, raw renderer outputs), the room camera pose and the
+start yaw of the object.
 
 GeoEdgeImage is copied from the SoftMimicGen fork (source/softmimicgen/softmimicgen/mdp/observations.py, 2026-09)
 without changes. RawCameraImage is new. Both read the camera render product with Replicator annotators.
@@ -15,6 +16,14 @@ from isaaclab.utils.array import convert_to_torch
 
 # camera name -> {instance id: prim path}. RawCameraImage fills it. generate_demos.py saves it as json.
 INSTANCE_LABELS: dict[str, dict] = {}
+
+
+def object_start_yaw(env) -> torch.Tensor:
+    """(num_envs, 1) float32: the start yaw of the object in degrees, as drawn by the reset event
+    reset_nodal_state_yaw_centers (events.py). The same value in every step of a demo. Zero when the event is off."""
+    import events  # same folder; generate_demos.py puts it on sys.path
+
+    return events.object_yaw_store(env).view(-1, 1)
 
 
 class GeoEdgeImage(ManagerTermBase):

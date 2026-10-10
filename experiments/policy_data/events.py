@@ -1,4 +1,5 @@
-"""Reset events for the demo generator. One event: a small random move of a fixed camera at every reset."""
+"""Reset events for the demo generator: a small random move of a fixed camera, and the start yaw of the object
+drawn around one of several centers (for example 0 or 180 degrees, so the robot folds from the other side)."""
 
 from __future__ import annotations
 
@@ -8,6 +9,7 @@ import torch
 
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import matrix_from_quat, quat_from_euler_xyz, quat_mul
+from softmimicgen.mdp.events import reset_nodal_state_uniform
 
 
 def project_points(points_w: torch.Tensor, cam_pos: torch.Tensor, cam_quat: torch.Tensor, intrinsic: torch.Tensor) -> torch.Tensor:
@@ -88,3 +90,47 @@ def randomize_camera_pose(
         pos_out.append(pos)
         rot_out.append(rot)
     cam.set_world_poses(torch.stack(pos_out), torch.stack(rot_out), env_ids=env_ids, convention=cam.cfg.offset.convention)
+
+
+def object_yaw_store(env) -> torch.Tensor:
+    """(num_envs,) float32 on the env device: the start yaw of the object in degrees, written by
+    reset_nodal_state_yaw_centers. Made once; zeros before the first reset."""
+    store = getattr(env, "policy_data_object_yaw_deg", None)
+    if store is None:
+        store = torch.zeros(env.num_envs, device=env.device)
+        env.policy_data_object_yaw_deg = store
+    return store
+
+
+def reset_nodal_state_yaw_centers(
+    env,
+    env_ids: torch.Tensor,
+    yaw_centers_deg: list,
+    yaw_noise_deg: tuple,
+    pose_range: dict,
+    velocity_range: dict,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+):
+    """Reset a deformable object like the upstream event reset_nodal_state_uniform, with the start yaw drawn around
+    one of several centers.
+
+    For every env one center of yaw_centers_deg is drawn (equal chance) and a noise from the range yaw_noise_deg
+    (lo, hi) is added. Example: centers (0, 180) with noise (-30, 30) give the upstream start or the object turned by
+    180 degrees, each with the upstream +-30 degrees. The x, y, z, roll and pitch ranges of pose_range are used as
+    in the upstream event; its yaw entry is replaced. The drawn yaw of every env is kept in degrees for the
+    observation term object_start_yaw (observations.py).
+    The draws use the torch random generator, so they follow the generation seed. Turning this event on changes
+    the random draws of the resets that follow (for example the camera noise), so a run needs its own seed.
+    """
+    dev = env.device
+    centers = torch.tensor([float(c) for c in yaw_centers_deg], device=dev)
+    pick = torch.randint(len(centers), (len(env_ids),), device=dev)
+    lo, hi = float(yaw_noise_deg[0]), float(yaw_noise_deg[1])
+    yaw_deg = centers[pick] + torch.rand(len(env_ids), device=dev) * (hi - lo) + lo
+    object_yaw_store(env)[env_ids] = yaw_deg
+    for k, env_id in enumerate(env_ids.tolist()):
+        yaw = math.radians(yaw_deg[k].item())
+        ranges = dict(pose_range)
+        ranges["yaw"] = (yaw, yaw)  # the upstream event draws from this range; one value gives exactly this yaw
+        reset_nodal_state_uniform(env, env_ids[k : k + 1], ranges, velocity_range, asset_cfg)
+        print(f"[policy_data] object start yaw: env {env_id}, {yaw_deg[k].item():+.1f} deg", flush=True)

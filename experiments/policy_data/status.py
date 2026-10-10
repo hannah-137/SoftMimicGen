@@ -82,7 +82,8 @@ REPLACE_LOCK = ".replace.lock"  # long: held by make_dataset.py --replace for th
 RUNNING_LOCK = ".running.lock"  # in a Cosmos run folder: held by its run_cosmos.py until it ends
 H5_WAIT = 600  # seconds to wait while another process has an hdf5 file open
 
-SOURCE_COLUMNS = ["demo", "source_run", "source_demo", "seed", "camera_noise_pos_m", "camera_noise_rot_deg", "steps"]
+SOURCE_COLUMNS = ["demo", "source_run", "source_demo", "seed", "camera_noise_pos_m", "camera_noise_rot_deg", "steps",
+                  "object_yaw_centers_deg", "hand_yaw_mod_180", "object_start_yaw_deg"]
 REPLACEMENT_COLUMNS = ["demo", "replacement", "old_source_run", "old_source_demo", "new_source_run", "new_source_demo",
                        "reason", "folder", "replaced_at"]
 REF_REJECTED_COLUMNS = ["demo", "name", "attempt", "source", "file", "room_score", "wrist_score", "reason",
