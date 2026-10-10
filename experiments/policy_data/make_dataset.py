@@ -21,7 +21,7 @@ the name instead: the folder is <out>/<name>/ and the hdf5 is <name>.hdf5. Use i
   sources.csv                         demo number -> source run and demo, seed, room camera noise, steps,
                                       object yaw setting of the run and the start yaw of the demo (degrees)
   run_config.json                     the takes, every run (relative path and its settings), the fixed values
-                                      for the reference images: variation_seed 0, tag 01, max_attempts 3, and
+                                      for the reference images: variation_seed 0, tag 01, max_attempts 2, and
                                       the version of the review items of the review page: review_items 2
 All runs must have the same task, cameras, image size, video frames and simulation settings, and different seeds
 (the same seed repeats the start poses). The runs can number the instance ids differently, so every demo keeps the

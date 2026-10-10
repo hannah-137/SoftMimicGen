@@ -32,7 +32,7 @@ shares, strong light slots) are in `variations.py`.
 - Each number has one reference image and one video. Nothing is dropped: a number is done when its video is
   approved or marked weak (usable but weak; review.csv keeps the mark).
 - A number gets another simulator demo (`make_dataset.py --replace`) when the demo looks wrong in the simulator,
-  its reference image failed 3 times, or its video was rejected 3 times. The number keeps its place type and its
+  its reference image failed 2 times, or its video was rejected 2 times. The number keeps its place type and its
   strong light slot, so the ratios below stay exact.
 
 ## Reference images
@@ -49,7 +49,7 @@ shares, strong light slots) are in `variations.py`.
 | Other axes | every item has the same chance |
 | No repeat | no two images in the dataset share the same 7 values |
 | Checks | missing image; wrong folder; aspect 2:1; layout against simulator frame 0: towel (both views), table of the wrist view and robot (wrist view) within 8 px, table of the room view within 20 px, no missing table edge, no other surface on more than 5 % of the table top or the towel, the same table look in both views, no part of the wrist table that looks like the floor of the room view |
-| On failure | the image is made again with another combination, at most 3 images per demo |
+| On failure | the image is made again with another combination, at most 2 images per demo |
 
 Prompt (the same for every image; `{variation}` is the only part that changes):
 
@@ -81,7 +81,7 @@ Axes (every image changes all 7 at once):
 | Reference | the reference image as frame 0 |
 | Output | 81 frames, 16 fps, 1024x512. With `run_cosmos.py --all_steps`: every step of the demo (131 to 133 frames for the Franka towel task), made in one chunk and stored at the control rate of the simulator (20 fps) |
 | Settings | 35 steps, guidance 3, control guidance 3, shift 5, seed 0 (a new seed when a video is made again) |
-| Review | a person marks every video approved, weak or rejected; weak and rejected need at least one reason; at most 3 videos per demo. The reasons are per view (room, wrist): towel look, towel shape, table, robot, floor, background, lighting, extra object, image quality. Every video also gets a level for how well the two views match: same, small difference, large difference, not the same (review items version 2; a dataset from before 2026-10-09 has version 1, one list of reasons) |
+| Review | a person marks every video approved, weak or rejected; weak and rejected need at least one reason; at most 2 videos per demo. The reasons are per view (room, wrist): towel look, towel shape, table, robot, floor, background, lighting, extra object, image quality. Every video also gets a level for how well the two views match: same, small difference, large difference, not the same (review items version 2; a dataset from before 2026-10-09 has version 1, one list of reasons) |
 
 ## Change history
 
