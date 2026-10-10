@@ -70,7 +70,7 @@ import variations
 HERE = os.path.dirname(os.path.abspath(__file__))
 SPEC = "v2"  # spec version (specs/<version>.json) of new reference images when --spec is not given
 UNRECORDED_SPEC = "v2"  # images made before refs/references.csv had the column spec (2026-09-29) follow v2
-MAX_ATTEMPTS = 5  # reference images per demo, and videos per demo, before the demo is replaced
+MAX_ATTEMPTS = 3  # reference images per demo, and videos per demo, before the demo is replaced
 REVIEW_ITEMS = 2  # version of the review items of a new dataset (run_config.json "review_items")
 UNRECORDED_REVIEW_ITEMS = 1  # a dataset from before run_config.json had review_items (2026-10-09) keeps version 1
 REVIEW_ITEM_VERSIONS = (1, 2)

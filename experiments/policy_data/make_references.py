@@ -3,7 +3,7 @@
   export OPENAI_API_KEY=...
   python experiments/policy_data/make_references.py <run_dir> [--demos 0-49] [--spec v2] [--seed 0]
       [--model <model>] [--quality <quality>] [--size <WxH>] [--tag 01] [--workers 3]
-      [--retry] [--redo --reason "<why>"] [--max_attempts 5] [--dry_run] [--refs <folder>]
+      [--retry] [--redo --reason "<why>"] [--max_attempts 3] [--dry_run] [--refs <folder>]
 
 <run_dir> is a run folder (make_demos.sh) or a dataset folder (make_dataset.py).
 Input: <run_dir>/ref_sim/000-049/demo_NNN_ref_sim.png (frame 0, room | wrist, 1024x512, made by make_videos.py).
@@ -37,7 +37,7 @@ and the reason.
 example after a change of the variation lists), as a new attempt. The old image goes to refs_rejected/ with the
 reason. A demo that has a Cosmos video (or that a running run_cosmos.py works on) is not made again: reject its
 video on the review page with "reference image problem" instead, so the image and the video are made again together.
---max_attempts (default 5): a demo gets at most this many images. In a dataset the count starts again when
+--max_attempts (default 3): a demo gets at most this many images. In a dataset the count starts again when
 make_dataset.py --replace puts another demo at the number. When a demo reaches the limit, the script prints the
 make_dataset.py --replace command for it.
 In a dataset folder (with the default --refs), --seed, --tag and --max_attempts come from its run_config.json
