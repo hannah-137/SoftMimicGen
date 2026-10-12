@@ -235,6 +235,16 @@ work again every time: run them once per step. (`--replace` without `--reason` o
 
        python experiments/policy_data/status.py <dataset>
 
+9. A share folder for other people, with the Cosmos videos sorted by the review result (`videos/<O|weak|X|not_reviewed>/
+   demo_NNN/`), the list files and a view-only page (`index.html`). The folder is a copy, not hard links. Run the
+   command again after new videos or new reviews: it copies only new or changed files and moves the demos whose
+   verdict changed. When it runs as root (the review files are root-owned in the container), `--owner UID:GID` gives
+   the files to a user.
+
+       python experiments/policy_data/share.py <dataset> /data/hyeonahj/share/<name> --owner 1025:1023
+
+   To open the page from another machine: `python3 serve.py 8766` in the share folder, then forward port 8766.
+
 ## Dataset folder
 
 `make_dataset.py --take` copies the demos into one hdf5 and numbers them 0, 1, 2, ... The videos and frame-0 images
@@ -359,6 +369,8 @@ Folder names are fixed by the scripts. Do not rename them or add words.
 - `status.py` - state of a dataset (`dataset.csv`, `videos.csv`) and the next commands; the lock and csv helpers.
 - `review.py` - review page (web server, standard library only): mark videos O, weak or X with reasons, and check
   the simulator demos.
+- `share.py`, `share_serve.py` - share folder of the videos sorted by the review result, with a view-only page and
+  its small web server.
 - `SPEC.md` - the dataset spec: demos, ratios, reference images, Cosmos settings.
 - `checks/check_references.py` - size and layout check of the reference images.
 - `checks/reference_layout.py` - the layout check of one image (used by `check_references.py`).
