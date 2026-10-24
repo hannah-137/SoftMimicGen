@@ -4,7 +4,8 @@
 The generation itself is the upstream one (source dataset, subtask configs, success check, retry until N successful
 demos, failed demos in <output>_failed.hdf5). This script only changes:
 
-  --image_size    the cameras render at this square size (default 512; 0 = keep the task's camera size)
+  --image_size    the cameras render at this size: N for N x N, or WxH such as 480x360 (default 512; 0 = keep the
+                  task's camera size). Keep the task's aspect ratio for the same view.
   --wrist_focal   focal length of the wrist cameras in mm (default 12; upstream Franka value is 24; 0 = keep the
                   task's value)
   --wrist_camera  one or more wrist cameras (bimanual tasks have one per arm)
@@ -74,7 +75,7 @@ parser.add_argument("--input_file", type=str, required=True, help="Annotated sou
 parser.add_argument("--output_file", type=str, default="./datasets/output_dataset.hdf5", help="Output dataset (hdf5).")
 parser.add_argument("--enable_pinocchio", action="store_true", default=False, help="Enable Pinocchio (humanoid tasks).")
 parser.add_argument("--seed", type=int, default=1, help="Generation seed.")
-parser.add_argument("--image_size", type=int, default=512, help="Camera image size in pixels (square). 0 keeps the task's size.")
+parser.add_argument("--image_size", type=str, default="512", help="Camera image size in pixels: N (square) or WxH. 0 keeps the task's size.")
 parser.add_argument("--wrist_focal", type=float, default=12.0, help="Wrist camera focal length in mm. 0 keeps the task's value.")
 parser.add_argument("--room_camera", type=str, default="agentview_image", help="Scene name of the room camera.")
 parser.add_argument("--wrist_camera", type=str, nargs="+", default=["robot0_eye_in_hand_image"], help="Scene names of the wrist cameras (one or more).")
@@ -139,6 +140,15 @@ PLAIN_GROUND_SIZE = 200.0  # m, the box floor is far larger than any camera can 
 PLAIN_GROUND_THICKNESS = 0.02  # m
 
 
+def image_size(text: str) -> tuple[int, int] | None:
+    """--image_size: "512" -> (512, 512), "480x360" -> (480, 360), "0" -> None (keep the task's size)."""
+    if "x" in text.lower():
+        w, h = (int(v) for v in text.lower().split("x"))
+        return w, h
+    n = int(text)
+    return (n, n) if n > 0 else None
+
+
 def term_prefix(camera: str) -> str:
     """agentview_image -> agentview"""
     return camera[: -len("_image")] if camera.endswith("_image") else camera
@@ -169,13 +179,14 @@ def hand_yaw_mod_180(warp):
 def configure(env_cfg, args) -> None:
     """Set the cameras, the observation terms and the scene options (object start yaw, table, ground)."""
     cameras = [args.room_camera, *args.wrist_camera]
+    size = image_size(args.image_size)
     for name in cameras:
         cam = getattr(env_cfg.scene, name, None)
         if cam is None:
             raise SystemExit(f"[policy_data] this task has no camera named {name!r}. Use --room_camera / --wrist_camera.")
-        if args.image_size > 0:
-            print(f"[policy_data] {name}: {cam.width}x{cam.height} -> {args.image_size}x{args.image_size}")
-            cam.height = cam.width = args.image_size
+        if size is not None:
+            print(f"[policy_data] {name}: {cam.width}x{cam.height} -> {size[0]}x{size[1]}")
+            cam.width, cam.height = size
         else:
             print(f"[policy_data] {name}: {cam.width}x{cam.height} (task size kept)")
         if args.far_clip is not None:
