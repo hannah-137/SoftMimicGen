@@ -1,7 +1,7 @@
 """Videos and a summary from a demo hdf5. No GPU needed.
 
   python experiments/policy_data/make_videos.py <demos.hdf5> [--out <dir>] [--all_frames] [--far 2.0]
-      [--cameras ROOM WRIST [WRIST ...]] [--cell WxH]
+      [--cameras ROOM [WRIST ...]] [--cell WxH]
 
 Output in <dir> (default: folder of the hdf5). Per demo, in demos/000-049/demo_NNN/ (50 demos per folder, see
 layout.py):
@@ -20,8 +20,9 @@ step at the control rate. Needs h5py, numpy, opencv-python, imageio, imageio-ffm
 
 Views: without --cameras the two RGB observations (room and wrist) are found by name. --cameras gives the scene
 names of the cameras in tile order (room first). The RGB of a camera is <camera>_rgb when the hdf5 has it
-(generate_demos.py --rgb_full), else the observation with the camera name. Two views go side by side; three or four
-go into a 2x2 grid, row by row, and an empty cell stays black (YAM: top | left wrist / right wrist | black).
+(generate_demos.py --rgb_full), else the observation with the camera name. One view stays as it is (humanoid: one
+POV camera). Two views go side by side; three or four go into a 2x2 grid, row by row, and an empty cell stays black
+(YAM: top | left wrist / right wrist | black).
 --cell WxH resizes every view to W x H first (for example 320x240 gives a 640x480 grid of three views). An edge line
 stays a line when it is made smaller (a cell pixel is an edge when any pixel under it is one).
 """
@@ -99,12 +100,15 @@ def tile(left: np.ndarray, right: np.ndarray, line: bool = False) -> np.ndarray:
 
 
 def grid(views: list, line: bool = False) -> np.ndarray:
-    """One frame from the views of one step: two side by side (same as tile), three or four in a 2x2 grid, row by
-    row, with an empty cell black. With line=True a 1 px white line marks the borders between the cells."""
+    """One frame from the views of one step: one view as it is, two side by side (same as tile), three or four in a
+    2x2 grid, row by row, with an empty cell black. With line=True a 1 px white line marks the borders between the
+    cells."""
+    if len(views) == 1:
+        return views[0]
     if len(views) == 2:
         return tile(views[0], views[1], line)
     if not 3 <= len(views) <= 4:
-        sys.exit(f"{len(views)} views: use 2, 3 or 4 cameras")
+        sys.exit(f"{len(views)} views: use 1 to 4 cameras")
     cells = list(views) + [np.zeros_like(views[0])] * (4 - len(views))
     out = np.concatenate([np.concatenate(cells[:2], axis=1), np.concatenate(cells[2:], axis=1)], axis=0)
     if line:

@@ -17,7 +17,10 @@
 #              --rgb_full (also record every camera's RGB at its render size; for tasks whose own RGB observation is
 #              cropped or smaller, for example YAM)
 #              --room_camera NAME / --wrist_camera NAME[,NAME...] (default agentview_image / robot0_eye_in_hand_image;
-#              bimanual tasks give one wrist camera per arm, comma separated)
+#              bimanual tasks give one wrist camera per arm, comma separated; none for a task without a wrist
+#              camera, for example humanoid_towel with --room_camera robot_pov_cam)
+#              --enable_pinocchio (humanoid tasks: the Pink IK controller needs Pinocchio; same option as the
+#              upstream scripts)
 #              --camera_noise_pos M --camera_noise_rot DEG (room camera: random offset per demo, default 0 = fixed)
 #              --table upstream|clean_top|wide_top (default upstream; clean_top: no metal parts and no bolt holes;
 #              wide_top: clean_top with a wider top, so the wrist camera does not see the floor; see table.py)
@@ -32,11 +35,11 @@
 #
 # Run inside the SoftMimicGen environment (conda activate softmimicgen).
 set -eo pipefail
-usage() { sed -n '2,31p' "$0"; exit 1; }
+usage() { sed -n '2,34p' "$0"; exit 1; }
 [ $# -ge 2 ] || usage
 TASK="$1"; N="$2"; shift 2
 SEED=1; GPU=0; NUM_ENVS=1; WRIST_FOCAL=12; IMAGE_SIZE=512; RAW=""; FRAMES=""; CAM_POS=0; CAM_ROT=0; TABLE=upstream; GROUND=upstream
-RENDER=quality; YAW_CENTERS=""; YAW_NOISE=""; HAND_MOD=""; OBJ_SCALE=1; RGB_FULL=""; SKIP_RAW=""
+RENDER=quality; YAW_CENTERS=""; YAW_NOISE=""; HAND_MOD=""; OBJ_SCALE=1; RGB_FULL=""; SKIP_RAW=""; PINOCCHIO=""
 ROOM_CAM=agentview_image; WRIST_CAM=robot0_eye_in_hand_image
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -59,6 +62,7 @@ while [ $# -gt 0 ]; do
     --no_raw) RAW="--no_raw"; shift ;;
     --skip_raw) SKIP_RAW="${2:?--skip_raw needs a value}"; shift 2 ;;
     --rgb_full) RGB_FULL="--rgb_full"; shift ;;
+    --enable_pinocchio) PINOCCHIO="--enable_pinocchio"; shift ;;
     --all_frames) FRAMES="--all_frames"; shift ;;
     *) echo "unknown option: $1"; usage ;;
   esac
@@ -71,7 +75,8 @@ YAW_ARGS=()  # only the options that were given, so the defaults of generate_dem
 [ -n "$YAW_CENTERS" ] && YAW_ARGS+=(--object_yaw_centers $YAW_CENTERS)
 [ -n "$YAW_NOISE" ] && YAW_ARGS+=(--object_yaw_noise "$YAW_NOISE")
 [ -n "$HAND_MOD" ] && YAW_ARGS+=("$HAND_MOD")
-IFS=, read -ra WRIST_CAMS <<< "$WRIST_CAM"  # one or more wrist cameras, comma separated
+IFS=, read -ra WRIST_CAMS <<< "$WRIST_CAM"  # one or more wrist cameras, comma separated, or none
+VIEW_CAMS=("$ROOM_CAM"); [ "$WRIST_CAM" = none ] || VIEW_CAMS+=("${WRIST_CAMS[@]}")  # cameras of the videos
 SKIP_ARGS=()  # only when given, so generate_demos.py records every raw kind by default
 [ -n "$SKIP_RAW" ] && { IFS=, read -ra SKIP_KINDS <<< "$SKIP_RAW"; SKIP_ARGS=(--skip_raw "${SKIP_KINDS[@]}"); }
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -99,7 +104,7 @@ json.dump({"task": "$TASK", "n_demos": int("$N"), "seed": int("$SEED"), "gpu": "
            "table": "$TABLE", "ground": "$GROUND", "rendering_mode": "$RENDER",
            "object_yaw_centers_deg": [float(v) for v in "$YAW_CENTERS".split()] or None,
            "object_yaw_noise_deg": float("$YAW_NOISE") if "$YAW_NOISE" else None, "hand_yaw_mod_180": "$HAND_MOD" != "",
-           "object_scale": float("$OBJ_SCALE"), "rgb_full": "$RGB_FULL" != "",
+           "object_scale": float("$OBJ_SCALE"), "rgb_full": "$RGB_FULL" != "", "enable_pinocchio": "$PINOCCHIO" != "",
            "skip_raw": ["depth", "normals", "instance"] if "$RAW" else [k for k in "$SKIP_RAW".split(",") if k],
            "started": "$(date -Iseconds)", "git_commit": "$COMMIT"}, open(sys.argv[1], "w"), indent=1)
 PY
@@ -109,7 +114,7 @@ python "$HERE/generate_demos.py" --device cuda:0 "--kit_args=$KIT_ARGS" \
   --input_file "$IN" --output_file "$OUT/$NAME.hdf5" --generation_num_trials "$N" --num_envs "$NUM_ENVS" \
   --seed "$SEED" --wrist_focal "$WRIST_FOCAL" --image_size "$IMAGE_SIZE" $RAW "${SKIP_ARGS[@]}" $RGB_FULL \
   --camera_noise_pos "$CAM_POS" --camera_noise_rot "$CAM_ROT" --table "$TABLE" --ground "$GROUND" \
-  --rendering_mode "$RENDER" "${YAW_ARGS[@]}" --object_scale "$OBJ_SCALE" \
+  --rendering_mode "$RENDER" "${YAW_ARGS[@]}" --object_scale "$OBJ_SCALE" $PINOCCHIO \
   --room_camera "$ROOM_CAM" --wrist_camera "${WRIST_CAMS[@]}" --enable_cameras --headless 2>&1 | tee "$OUT/gen.log"
 GEN_RC=${PIPESTATUS[0]}
 set -e
@@ -125,7 +130,7 @@ p = sys.argv[1]
 if os.path.isfile(p) and len(h5py.File(p, "r")["data"]) == 0:
     os.remove(p)
 PY
-python "$HERE/make_videos.py" "$OUT/$NAME.hdf5" --out "$OUT" $FRAMES --cameras "$ROOM_CAM" "${WRIST_CAMS[@]}" 2>&1 | tee "$OUT/videos.log"
+python "$HERE/make_videos.py" "$OUT/$NAME.hdf5" --out "$OUT" $FRAMES --cameras "${VIEW_CAMS[@]}" 2>&1 | tee "$OUT/videos.log"
 END=$(date +%s)
 {
   echo "dataset:     $OUT/$NAME.hdf5 ($DEMOS demos)"

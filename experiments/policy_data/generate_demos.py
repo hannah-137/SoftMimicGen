@@ -8,7 +8,8 @@ demos, failed demos in <output>_failed.hdf5). This script only changes:
                   task's camera size). Keep the task's aspect ratio for the same view.
   --wrist_focal   focal length of the wrist cameras in mm (default 12; upstream Franka value is 24; 0 = keep the
                   task's value)
-  --wrist_camera  one or more wrist cameras (bimanual tasks have one per arm)
+  --wrist_camera  one or more wrist cameras (bimanual tasks have one per arm), or none for a task without a wrist
+                  camera (humanoid: one POV camera, given as --room_camera robot_pov_cam)
   --rgb_full      also record the RGB image of every camera at its render size (for tasks whose own RGB
                   observation is cropped or made smaller, for example YAM: top 320x240, wrists 84x84)
   --seed          generation seed (default 1 = upstream). Same seed gives the same generation choices
@@ -78,7 +79,7 @@ parser.add_argument("--seed", type=int, default=1, help="Generation seed.")
 parser.add_argument("--image_size", type=str, default="512", help="Camera image size in pixels: N (square) or WxH. 0 keeps the task's size.")
 parser.add_argument("--wrist_focal", type=float, default=12.0, help="Wrist camera focal length in mm. 0 keeps the task's value.")
 parser.add_argument("--room_camera", type=str, default="agentview_image", help="Scene name of the room camera.")
-parser.add_argument("--wrist_camera", type=str, nargs="+", default=["robot0_eye_in_hand_image"], help="Scene names of the wrist cameras (one or more).")
+parser.add_argument("--wrist_camera", type=str, nargs="+", default=["robot0_eye_in_hand_image"], help="Scene names of the wrist cameras (one or more), or none.")
 parser.add_argument("--rgb_full", action="store_true", default=False, help="Also record the RGB image of every camera at its render size as <camera>_rgb.")
 parser.add_argument("--no_raw", action="store_true", default=False, help="Do not record the raw depth, normals and instance id.")
 parser.add_argument("--skip_raw", nargs="+", choices=["depth", "normals", "instance"], default=[], help="Do not record the raw data of these kinds (one or more of depth, normals, instance).")
@@ -95,6 +96,8 @@ parser.add_argument("--hand_yaw_mod_180", action="store_true", default=False, he
 parser.add_argument("--object_scale", type=float, default=1.0, help="Scale of the object USD at spawn (default 1 = the task's own size).")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
+if args_cli.wrist_camera == ["none"]:
+    args_cli.wrist_camera = []  # a task without a wrist camera
 
 if args_cli.enable_pinocchio:
     import pinocchio  # noqa: F401  (must come before the app, same as the upstream script)
