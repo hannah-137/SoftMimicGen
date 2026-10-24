@@ -46,7 +46,7 @@ and it records extra observations for every camera (see observations.py):
 
   <camera>_geoedge        (H, W, 1) uint8, 0 or 255      geometry edges
   <camera>_rgb            (H, W, 3) uint8                RGB at the render size (only with --rgb_full)
-  <camera>_depth_raw      (H, W, 1) float32, meters      raw depth (skip with --no_raw)
+  <camera>_depth_raw      (H, W, 1) float32, meters      raw depth (the raw kinds: skip some with --skip_raw, all with --no_raw)
   <camera>_normals_raw    (H, W, 3) float32              raw surface normals
   <camera>_instance_raw   (H, W, 1) int32                raw instance id
 
@@ -80,6 +80,7 @@ parser.add_argument("--room_camera", type=str, default="agentview_image", help="
 parser.add_argument("--wrist_camera", type=str, nargs="+", default=["robot0_eye_in_hand_image"], help="Scene names of the wrist cameras (one or more).")
 parser.add_argument("--rgb_full", action="store_true", default=False, help="Also record the RGB image of every camera at its render size as <camera>_rgb.")
 parser.add_argument("--no_raw", action="store_true", default=False, help="Do not record the raw depth, normals and instance id.")
+parser.add_argument("--skip_raw", nargs="+", choices=["depth", "normals", "instance"], default=[], help="Do not record the raw data of these kinds (one or more of depth, normals, instance).")
 parser.add_argument("--far_clip", type=float, default=None, help="Far clipping plane of both cameras in m (default: task value).")
 parser.add_argument("--depth_jump", type=float, default=0.02, help="Edge rule: depth difference in m.")
 parser.add_argument("--normal_angle", type=float, default=25.0, help="Edge rule: surface normal angle in degrees.")
@@ -202,11 +203,12 @@ def configure(env_cfg, args) -> None:
             terms[f"{prefix}_rgb"] = ObservationTermCfg(
                 func=isaaclab_mdp.image, params={"sensor_cfg": sensor, "data_type": "rgb", "normalize": False}
             )
-        if not args.no_raw:
-            for kind in ("depth", "normals", "instance"):
-                terms[f"{prefix}_{kind}_raw"] = ObservationTermCfg(
-                    func=observations.RawCameraImage, params={"sensor_cfg": sensor, "kind": kind}
-                )
+        for kind in ("depth", "normals", "instance"):
+            if args.no_raw or kind in args.skip_raw:
+                continue
+            terms[f"{prefix}_{kind}_raw"] = ObservationTermCfg(
+                func=observations.RawCameraImage, params={"sensor_cfg": sensor, "kind": kind}
+            )
         for term_name, term in terms.items():
             setattr(policy, term_name, term)
         print(f"[policy_data] {name}: observations {', '.join(terms)}")

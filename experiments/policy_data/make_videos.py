@@ -7,7 +7,8 @@ Output in <dir> (default: folder of the hdf5). Per demo, in demos/000-049/demo_N
 layout.py):
   demo_NNN_source.mp4     room | wrist RGB, side by side (1024x512), lossy
   demo_NNN_geoedge.mp4    room | wrist geometry edges, lossless, 1 px white line on the border. Control video.
-  demo_NNN_depth.mp4      raw depth as gray: 0 m black, far plane white (lossless)
+  demo_NNN_depth.mp4      raw depth as gray: 0 m black, far plane white (lossless; depth, normals and instance only
+                          when the hdf5 has that raw kind for every camera)
   demo_NNN_normals.mp4    raw normals as color: (xyz + 1) * 127.5 (lossless)
   demo_NNN_instance.mp4   raw instance id as color, one fixed color per id (lossless)
 and in ref_sim/000-049/ (one folder per 50 demos, easy to download):
@@ -219,17 +220,18 @@ def main():
             write(f"{d}/{name}_geoedge.mp4", edge_frames, fps, LOSSLESS_EDGE, check=True)
             del edges, edge_frames
 
-            if f"{prefixes[0]}_depth_raw" in obs:
-                conv = {
-                    "depth": lambda k: depth_to_gray(obs[f"{k}_depth_raw"][:][sel], args.far),
-                    "normals": lambda k: normals_to_rgb(obs[f"{k}_normals_raw"][:][sel]),
-                    "instance": lambda k: instance_to_rgb(obs[f"{k}_instance_raw"][:][sel]),
-                }
-                for kind, fn in conv.items():
-                    per_view = [fit(fn(p), cell, "nearest") for p in prefixes]
-                    frames = [grid(list(f)) for f in zip(*per_view)]
-                    write(f"{d}/{name}_{kind}.mp4", frames, fps, LOSSLESS_RGB, check=True)
-                    del per_view, frames
+            conv = {
+                "depth": lambda k: depth_to_gray(obs[f"{k}_depth_raw"][:][sel], args.far),
+                "normals": lambda k: normals_to_rgb(obs[f"{k}_normals_raw"][:][sel]),
+                "instance": lambda k: instance_to_rgb(obs[f"{k}_instance_raw"][:][sel]),
+            }
+            for kind, fn in conv.items():
+                if not all(f"{p}_{kind}_raw" in obs for p in prefixes):
+                    continue  # not recorded (generate_demos.py --skip_raw or --no_raw)
+                per_view = [fit(fn(p), cell, "nearest") for p in prefixes]
+                frames = [grid(list(f)) for f in zip(*per_view)]
+                write(f"{d}/{name}_{kind}.mp4", frames, fps, LOSSLESS_RGB, check=True)
+                del per_view, frames
 
             rows.append([idx, steps, round(steps / control_fps(h5), 2), bool(h5["data"][key].attrs.get("success", True))])
             first.append(rgb[0][0].copy())
