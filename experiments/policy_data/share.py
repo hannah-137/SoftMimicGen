@@ -15,7 +15,7 @@ Layout of the share folder:
 A demo is in O when its video is approved, in weak or X when it is marked weak or rejected with a reason, else in
 not_reviewed (the rule of status.py). Only the current video of a demo is shared. The files of one demo are the
 Cosmos video and its settings, the reference image, frame 0 of the simulator, the simulator video with every step
-(source_all) and its edge video (geoedge_all), and a text file with the two prompts.
+(source_all), its edge video (geoedge_all), its instance mask video (instance_all), and a text file with the two prompts.
 """
 import argparse
 import csv
@@ -33,7 +33,7 @@ FOLDER_OF = {"approved": "O", "weak": "weak", "rejected": "X"}
 VERDICT_OF = {"O": "approved", "weak": "weak", "X": "rejected", "not_reviewed": ""}
 LISTS = ["review.csv", "review_history.csv", "videos.csv", "dataset.csv", "sources.csv", "replacements.csv",
          "run_config.json", "refs/references.csv", "refs/check_references.csv", "refs_rejected/rejected.csv"]
-SIM_FILES = ["source_all", "geoedge_all"]
+SIM_FILES = ["source_all", "geoedge_all", "instance_all"]
 
 
 def folder_of(rev: dict, version: int) -> str:
@@ -278,6 +278,7 @@ function card(x) {
     ${x.note ? `<div class="note"><b>Review note:</b> ${esc(x.note)}</div>` : ""}
     <div class="more">More files:
       <a href="${demo}_geoedge_all.mp4" target="_blank">edge control</a>
+      <a href="${demo}_instance_all.mp4" target="_blank">instance</a>
       <a href="${dir}/${x.name}.json" target="_blank">settings (json)</a>
       <a href="${demo}_prompts.txt" target="_blank">prompts (txt)</a>
       <span style="color: var(--dim)">simulator source: ${esc(x.src)}</span></div>
@@ -359,7 +360,7 @@ Cosmos videos of the dataset `__DS__`, sorted by the review result. Updated __WH
     Left half: room camera. Right half: wrist camera. `demo_NNN_TT.json`: settings of the Cosmos run (prompt, seed).
   - `demo_NNN_TT.png`: reference image (frame 0 of the Cosmos video). `demo_NNN_ref_sim.png`: frame 0 of the simulator.
   - `demo_NNN_source_all.mp4`: simulator video with the same frames. `demo_NNN_geoedge_all.mp4`: its edge video,
-    the control input of Cosmos.
+    the control input of Cosmos. `demo_NNN_instance_all.mp4`: instance mask, one color per object, same frames.
   - `demo_NNN_prompts.txt`: the prompt of the reference image and the prompt of the Cosmos video.
 - `lists/`: the list files of the dataset. `review.csv` has the verdict, the reasons and the level of the two views
   of every video. `refs/references.csv` has the prompt and the scene words of every reference image.
