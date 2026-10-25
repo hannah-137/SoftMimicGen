@@ -6,11 +6,13 @@ after the fact, from the raw instance ids in the hdf5.
 
 How it works, for each demo and frame:
 1. Towel pixels = pixels whose instance id maps to a prim path with "/Object/" (from <hdf5>_instance_ids.json).
+   Other tasks name the towel prim differently: --object_path /Cloth/ for YAM.
 2. border_px = the smallest distance from a towel pixel to the image border, in pixels.
 3. The demo is marked "cut" when border_px < --margin in any frame (default margin 1: the towel touches the border).
 
 Usage:
     python checks/check_towel_in_view.py <hdf5> [--out check_towel_in_view.csv] [--margin 1] [--stride 1]
+        [--object_path /Object/]
 
 Output: one csv row per demo (demo, frames, min_border_px, worst_frame, cut) and the list of the marked demos on
 the console. --stride N checks every N-th frame (faster). Needs h5py and numpy.
@@ -31,11 +33,16 @@ import layout  # noqa: E402
 COLUMNS = ["demo", "frames", "min_border_px", "worst_frame", "cut"]
 
 
-def towel_ids(table_path: str, camera_key: str) -> list:
+def towel_ids(table_path: str, prefix: str, object_path: str) -> list:
+    """Instance ids of the towel in the room camera. The table key is the scene name of the camera: <prefix>_image
+    (Franka: agentview_image) or <prefix> (YAM: top_camera)."""
     table = json.load(open(table_path))
-    ids = [int(k) for k, prim in table.get(camera_key, {}).items() if "/Object/" in prim]
+    key = next((k for k in (prefix + "_image", prefix) if k in table), None)
+    if key is None:
+        sys.exit(f"no camera {prefix}_image or {prefix} in {table_path}")
+    ids = [int(k) for k, prim in table[key].items() if object_path in prim]
     if not ids:
-        sys.exit(f"no towel instance id (prim path with /Object/) for {camera_key} in {table_path}")
+        sys.exit(f"no towel instance id (prim path with {object_path}) for {key} in {table_path}")
     return ids
 
 
@@ -54,6 +61,8 @@ def main():
     ap.add_argument("--out", default="check_towel_in_view.csv", help="csv path (default: current folder)")
     ap.add_argument("--margin", type=float, default=1.0, help="a towel pixel closer than this to the border = cut")
     ap.add_argument("--stride", type=int, default=1, help="check every N-th frame")
+    ap.add_argument("--object_path", default="/Object/",
+                    help="part of the towel prim path in the instance id table (default /Object/ for Franka; YAM: /Cloth/)")
     args = ap.parse_args()
 
     table_path = args.hdf5[: -len(".hdf5")] + "_instance_ids.json"
@@ -64,7 +73,7 @@ def main():
         room = [k for k in obs0 if k.endswith("_instance_raw") and "eye_in_hand" not in k and "wrist" not in k]
         if len(room) != 1:
             sys.exit(f"cannot find the room camera instance channel: {room}")
-        ids = np.array(towel_ids(table_path, room[0][: -len("_instance_raw")] + "_image"))
+        ids = np.array(towel_ids(table_path, room[0][: -len("_instance_raw")], args.object_path))
         for key in keys:
             data = f["data"][key]["obs"][room[0]]
             best, worst = float("inf"), -1
