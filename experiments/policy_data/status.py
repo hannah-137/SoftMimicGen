@@ -49,7 +49,8 @@ SPEC is the spec version (specs/<version>.json) of new reference images when --s
 the version of a row of refs/references.csv. A dataset can set its own spec version in run_config.json with
 make_dataset.py --set spec=<version> (DATASET_SETTINGS, see default_spec()); the video layout of that spec (views,
 cosmos size and chunk, see variations.py) then applies to the dataset, for example yam_towel/v1. A dataset without it
-(the Franka towel ones) uses SPEC and the default layout.
+(the Franka towel ones) uses SPEC and the default layout. A spec with "reference_check": false (yam_towel/v1) marks its
+images ref_check "skipped": they need no checks/check_references.py and go straight to needs_video.
 """
 
 import argparse
@@ -680,6 +681,7 @@ def collect(ds: str) -> tuple[list, list, list]:
 
     rows = []
     vd = views_dir(ds)  # the dataset itself, or the views folder of its spec
+    check_refs = dataset_spec(ds).reference_check  # False: the images go on without check_references.py
     for idx in range(n):
         src = current.get(idx, "")
         name = f"{layout.demo_name(idx)}_{tag}"
@@ -735,7 +737,7 @@ def collect(ds: str) -> tuple[list, list, list]:
                 row["ref_check"] = "passed" if chk.get("passed") == "True" else "failed"
                 row["room_score"], row["wrist_score"] = chk.get("room_score", ""), chk.get("wrist_score", "")
             else:
-                row["ref_check"] = "unchecked"
+                row["ref_check"] = "unchecked" if check_refs else "skipped"
         reason = False
         if vids:
             rev = reviews.get(video_id(vids[0]), {})

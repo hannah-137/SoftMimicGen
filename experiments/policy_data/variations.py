@@ -42,6 +42,8 @@ Specs of other tasks are in a folder per task: specs/<task>/<version>.json, load
 Such a spec can also hold the video layout of its task: "views" (the dataset subfolder with the videos and frame-0
 images to use, for example top_right), and in "cosmos" the keys "size" (WxH of the Cosmos video) and "chunk"
 (frames of one Cosmos chunk). A spec without them uses the defaults (dataset folder, 1024x512, one chunk).
+"reference_check": false lets the reference images of a dataset with this spec go to the Cosmos video without
+checks/check_references.py (default true).
 """
 
 import glob
@@ -102,6 +104,8 @@ class Spec:
         self.views = data.get("views", "")
         self.cosmos_size = data["cosmos"].get("size", "")
         self.cosmos_chunk = data["cosmos"].get("chunk", 0)
+        # False: the reference images skip checks/check_references.py (it knows only the Franka layout).
+        self.reference_check = data.get("reference_check", True)
         self.template = data["sentence"]
         self.card_template = data.get("card", "")
         self.axes = {a["name"]: a for a in data["axes"]}
@@ -263,6 +267,8 @@ def _check(s: Spec) -> None:
     if (not isinstance(s.controls, list) or "edge" not in s.controls or len(set(s.controls)) != len(s.controls)
             or not set(s.controls) <= set(CONTROLS)):
         raise ValueError(f"cosmos.controls must be a list with edge, from {', '.join(CONTROLS)}")
+    if not isinstance(s.reference_check, bool):
+        raise ValueError("reference_check must be true or false")
     if not isinstance(s.views, str) or os.path.isabs(s.views) or ".." in s.views.split("/"):
         raise ValueError("views must be a subfolder name of the dataset, for example top_right")
     if s.cosmos_size and not re.fullmatch(r"\d+x\d+", s.cosmos_size):
