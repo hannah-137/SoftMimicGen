@@ -9,7 +9,9 @@ requests with the token are served, and only .mp4 and .png files inside the data
 Videos tab: every Cosmos video of the group, next to its simulator video (it plays together with the Cosmos
 video), both as large as the window allows (side by side; one above the other in a window that is higher than
 wide). For a Cosmos video with every simulator step (run_cosmos.py --all_steps) the simulator video is the one with
-every step too (<demo>_source_all.mp4), so both have the same frames. The head of the card has a link that opens
+every step too (<demo>_source_all.mp4), so both have the same frames. When the spec of the dataset has a views
+folder (yam_towel/v1: top_right), the simulator videos and frame-0 images come from there (the videos that the
+Cosmos videos were made from). The head of the card has a link that opens
 the reference image in a new tab, the variation of the image (the line "card" of its spec version, v2: place,
 table, lighting, towel, robot) and the spec version of the video. Mark each
 video Approve (O), Weak (a triangle: usable but weak) or Reject (X). Weak counts as done, like Approve; review.csv
@@ -106,12 +108,20 @@ def all_steps(mp4: str) -> bool:
         return False
 
 
+def views_prefix(ds: str) -> str:
+    """"<views>/" when the spec of the dataset has a views folder (yam_towel/v1: top_right/, the videos that the
+    reference images and the Cosmos videos use), else "" (the dataset's own demos/ and ref_sim/)."""
+    views = status.dataset_spec(ds).views
+    return f"{views}/" if views else ""
+
+
 def sim_video(ds: str, group: str, demo: int, every_step: bool) -> str:
     """The simulator video of a demo, relative to the dataset. every_step: the one with every step
     (<demo>_source_all.mp4, written by run_cosmos.py --all_steps) when it is there, so it has the frames of a Cosmos
-    video made with --all_steps and the two play together. Else the 81-frame video."""
+    video made with --all_steps and the two play together. Else the 81-frame video. With a views folder
+    (views_prefix) the video there, which has every step already."""
     name = layout.demo_name(demo)
-    rel = f"demos/{group}/{name}/{name}_source"
+    rel = f"{views_prefix(ds)}demos/{group}/{name}/{name}_source"
     return f"{rel}_all.mp4" if every_step and os.path.isfile(f"{ds}/{rel}_all.mp4") else f"{rel}.mp4"
 
 
@@ -179,7 +189,7 @@ def items(ds: str, mode: str, group: str) -> dict:
                 "state": r["state"], "note": r["note"], "place_type": r["place_type"],
                 "strong_light": str(r["strong_light"]) == "1",
                 "files": {"sim": sim_video(ds, r["group"], r["demo"], True),
-                          "ref": f"ref_sim/{r['group']}/{name}_ref_sim.png"},
+                          "ref": f"{views_prefix(ds)}ref_sim/{r['group']}/{name}_ref_sim.png"},
                 "verdict": rev.get("verdict", ""), "review": rev.get("review", ""),
                 "reviewed_at": rev.get("reviewed_at", "")})
     else:  # rejected: to look at only (a rejected video without a reason is still to review: Videos tab)
