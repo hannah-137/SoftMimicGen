@@ -39,12 +39,16 @@ axes in order (as in v1 and v2).
 
 Specs of other tasks are in a folder per task: specs/<task>/<version>.json, loaded by the name "<task>/<version>"
 (yam_towel/v1 -> specs/yam_towel/v1.json). The specs in specs/ itself (v2 to v9) are the Franka towel ones.
+Such a spec can also hold the video layout of its task: "views" (the dataset subfolder with the videos and frame-0
+images to use, for example top_right), and in "cosmos" the keys "size" (WxH of the Cosmos video) and "chunk"
+(frames of one Cosmos chunk). A spec without them uses the defaults (dataset folder, 1024x512, one chunk).
 """
 
 import glob
 import json
 import os
 import random
+import re
 
 SPECS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "specs")
 CONTROLS = ("edge", "depth", "color")  # control videos that run_cosmos.py can give to Cosmos (key cosmos.controls)
@@ -92,6 +96,12 @@ class Spec:
         self.image = data["image"]
         self.cosmos = data["cosmos"]
         self.controls = data["cosmos"].get("controls", ["edge"])
+        # The video layout of the task (all optional; a spec without them, the Franka towel ones, uses the defaults of
+        # make_references.py and run_cosmos.py): the dataset subfolder with demos/ and ref_sim/ of the videos to
+        # use, the Cosmos video size and the frames of one Cosmos chunk.
+        self.views = data.get("views", "")
+        self.cosmos_size = data["cosmos"].get("size", "")
+        self.cosmos_chunk = data["cosmos"].get("chunk", 0)
         self.template = data["sentence"]
         self.card_template = data.get("card", "")
         self.axes = {a["name"]: a for a in data["axes"]}
@@ -253,6 +263,14 @@ def _check(s: Spec) -> None:
     if (not isinstance(s.controls, list) or "edge" not in s.controls or len(set(s.controls)) != len(s.controls)
             or not set(s.controls) <= set(CONTROLS)):
         raise ValueError(f"cosmos.controls must be a list with edge, from {', '.join(CONTROLS)}")
+    if not isinstance(s.views, str) or os.path.isabs(s.views) or ".." in s.views.split("/"):
+        raise ValueError("views must be a subfolder name of the dataset, for example top_right")
+    if s.cosmos_size and not re.fullmatch(r"\d+x\d+", s.cosmos_size):
+        raise ValueError("cosmos.size must be WxH, for example 640x240")
+    if s.cosmos_size and any(int(x) % 16 or not int(x) for x in s.cosmos_size.split("x")):
+        raise ValueError("cosmos.size needs both sides a multiple of 16")
+    if not isinstance(s.cosmos_chunk, int) or s.cosmos_chunk < 0 or (s.cosmos_chunk and (s.cosmos_chunk - 1) % 4):
+        raise ValueError("cosmos.chunk must be a frame count 4k+1, for example 389")
 
 
 if __name__ == "__main__":

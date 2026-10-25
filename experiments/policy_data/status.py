@@ -46,10 +46,10 @@ one version of them (review_items in its run_config.json). Version 1 is the list
 items for the room view and for the wrist view (VIEWS, VIEW_ITEMS) and one level for how well the two views match
 (VIEW_LEVELS, the column views of the list files).
 SPEC is the spec version (specs/<version>.json) of new reference images when --spec is not given; row_spec() gives
-the version of a row of refs/references.csv. A dataset can set its own settings in run_config.json with
-make_dataset.py --set (DATASET_SETTINGS): spec (its spec version instead of SPEC, see default_spec()), views (the
-subfolder with the videos and frame-0 images that the reference images and the Cosmos videos use, see views_dir()),
-cosmos_size and cosmos_chunk (for run_cosmos.py). A dataset without them (the Franka towel ones) uses the defaults.
+the version of a row of refs/references.csv. A dataset can set its own spec version in run_config.json with
+make_dataset.py --set spec=<version> (DATASET_SETTINGS, see default_spec()); the video layout of that spec (views,
+cosmos size and chunk, see variations.py) then applies to the dataset, for example yam_towel/v1. A dataset without it
+(the Franka towel ones) uses SPEC and the default layout.
 """
 
 import argparse
@@ -79,7 +79,7 @@ UNRECORDED_REVIEW_ITEMS = 1  # a dataset from before run_config.json had review_
 REVIEW_ITEM_VERSIONS = (1, 2)
 TAG = "01"  # a dataset has one reference image per demo: demo_NNN_01.png
 VARIATION_SEED = 0  # seed of variations.py for the reference images of a dataset
-DATASET_SETTINGS = ("spec", "views", "cosmos_size", "cosmos_chunk")  # run_config.json keys of make_dataset.py --set
+DATASET_SETTINGS = ("spec",)  # run_config.json keys of make_dataset.py --set
 LISTS_LOCK = ".lists.lock"  # short: held while a list file is written or a tracked file is moved
 REFS_LOCK = ".make_references.lock"  # long: held by make_references.py for the whole run
 REPLACE_LOCK = ".replace.lock"  # long: held by make_dataset.py --replace for the whole replace
@@ -316,12 +316,21 @@ def default_spec(folder: str) -> str:
     return SPEC
 
 
+def dataset_spec(folder: str):
+    """The spec (variations.Spec) of default_spec(folder); its views, cosmos_size and cosmos_chunk are the video
+    layout of the dataset."""
+    try:
+        return variations.load(default_spec(folder))
+    except ValueError as e:
+        sys.exit(f"{folder}: {e}")
+
+
 def views_dir(folder: str) -> str:
     """The folder with the videos (demos/) and the frame-0 images (ref_sim/) that the reference images and the Cosmos
-    videos use: <dataset>/<views> when run_config.json of a dataset has "views" (make_dataset.py --set), else the
-    folder itself."""
+    videos use: <dataset>/<views> when the spec of a dataset has views (yam_towel/v1: top_right), else the folder
+    itself."""
     if is_dataset(folder):
-        views = dataset_config(folder).get("views")
+        views = dataset_spec(folder).views
         if views:
             return os.path.join(folder, views)
     return folder
@@ -670,7 +679,7 @@ def collect(ds: str) -> tuple[list, list, list]:
                            "review_text": rev.get("review", "")})
 
     rows = []
-    vd = views_dir(ds)  # the dataset itself, or its views folder (run_config.json "views")
+    vd = views_dir(ds)  # the dataset itself, or the views folder of its spec
     for idx in range(n):
         src = current.get(idx, "")
         name = f"{layout.demo_name(idx)}_{tag}"

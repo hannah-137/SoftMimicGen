@@ -7,7 +7,7 @@
 
 <run_dir> is a run folder (make_demos.sh) or a dataset folder (make_dataset.py).
 Input: <run_dir>/ref_sim/000-049/demo_NNN_ref_sim.png (frame 0, room | wrist, 1024x512, made by make_videos.py); in
-a dataset with the setting views (make_dataset.py --set views=<folder>) <run_dir>/<folder>/ref_sim/... instead.
+a dataset whose spec has views (yam_towel/v1: top_right) <run_dir>/<views>/ref_sim/... instead.
 Output: <run_dir>/refs/000-049/demo_NNN_<tag>.png (the size of the frame-0 image) and <run_dir>/refs/references.csv
 with one row per
 image: the axes and the place type, the prompt, the tokens, the cost and the spec version. --demos takes numbers and
@@ -312,7 +312,7 @@ def make(args, run: str, refs: str, rejected: str, wanted: list | None, lock_dir
             sys.exit(f"{name}: {e}; give --spec")
 
     default_spec = status.default_spec(run)  # the spec of the dataset (run_config.json), else SPEC
-    views = status.views_dir(run)  # the dataset itself, or its views folder (run_config.json)
+    views = status.views_dir(run)  # the dataset itself, or the views folder of its spec
     pending = status.pending_replacements(run) if sources else set()
     claimed = status.cosmos_claims(run) if args.redo else {}
     jobs, gave_up, no_src = [], [], []
