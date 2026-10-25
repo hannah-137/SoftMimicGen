@@ -46,7 +46,10 @@ one version of them (review_items in its run_config.json). Version 1 is the list
 items for the room view and for the wrist view (VIEWS, VIEW_ITEMS) and one level for how well the two views match
 (VIEW_LEVELS, the column views of the list files).
 SPEC is the spec version (specs/<version>.json) of new reference images when --spec is not given; row_spec() gives
-the version of a row of refs/references.csv.
+the version of a row of refs/references.csv. A dataset can set its own settings in run_config.json with
+make_dataset.py --set (DATASET_SETTINGS): spec (its spec version instead of SPEC, see default_spec()), views (the
+subfolder with the videos and frame-0 images that the reference images and the Cosmos videos use, see views_dir()),
+cosmos_size and cosmos_chunk (for run_cosmos.py). A dataset without them (the Franka towel ones) uses the defaults.
 """
 
 import argparse
@@ -76,6 +79,7 @@ UNRECORDED_REVIEW_ITEMS = 1  # a dataset from before run_config.json had review_
 REVIEW_ITEM_VERSIONS = (1, 2)
 TAG = "01"  # a dataset has one reference image per demo: demo_NNN_01.png
 VARIATION_SEED = 0  # seed of variations.py for the reference images of a dataset
+DATASET_SETTINGS = ("spec", "views", "cosmos_size", "cosmos_chunk")  # run_config.json keys of make_dataset.py --set
 LISTS_LOCK = ".lists.lock"  # short: held while a list file is written or a tracked file is moved
 REFS_LOCK = ".make_references.lock"  # long: held by make_references.py for the whole run
 REPLACE_LOCK = ".replace.lock"  # long: held by make_dataset.py --replace for the whole replace
@@ -302,6 +306,25 @@ def dataset_config(ds: str) -> dict:
     if cfg["review_items"] not in REVIEW_ITEM_VERSIONS:
         sys.exit(f"{path}: review_items is {cfg['review_items']!r}, it must be 1 or 2")
     return cfg
+
+
+def default_spec(folder: str) -> str:
+    """The spec version of new reference images: "spec" in run_config.json of a dataset (make_dataset.py --set),
+    else SPEC."""
+    if is_dataset(folder):
+        return str(dataset_config(folder).get("spec") or SPEC)
+    return SPEC
+
+
+def views_dir(folder: str) -> str:
+    """The folder with the videos (demos/) and the frame-0 images (ref_sim/) that the reference images and the Cosmos
+    videos use: <dataset>/<views> when run_config.json of a dataset has "views" (make_dataset.py --set), else the
+    folder itself."""
+    if is_dataset(folder):
+        views = dataset_config(folder).get("views")
+        if views:
+            return os.path.join(folder, views)
+    return folder
 
 
 def file_sha1(path: str) -> str:
@@ -647,6 +670,7 @@ def collect(ds: str) -> tuple[list, list, list]:
                            "review_text": rev.get("review", "")})
 
     rows = []
+    vd = views_dir(ds)  # the dataset itself, or its views folder (run_config.json "views")
     for idx in range(n):
         src = current.get(idx, "")
         name = f"{layout.demo_name(idx)}_{tag}"
@@ -661,8 +685,8 @@ def collect(ds: str) -> tuple[list, list, list]:
         if idx in claims:
             row["note"] = f"cosmos running ({claims[idx]})"
         missing = False
-        for kind, path in (("geoedge video", f"{layout.demo_dir(ds, idx)}/{layout.demo_name(idx)}_geoedge.mp4"),
-                           ("frame-0 image", f"{layout.ref_sim_dir(ds, idx)}/{layout.demo_name(idx)}_ref_sim.png")):
+        for kind, path in (("geoedge video", f"{layout.demo_dir(vd, idx)}/{layout.demo_name(idx)}_geoedge.mp4"),
+                           ("frame-0 image", f"{layout.ref_sim_dir(vd, idx)}/{layout.demo_name(idx)}_ref_sim.png")):
             if not os.path.isfile(path):
                 problems.append(f"{layout.demo_name(idx)}: {kind} missing ({_rel(ds, path)})")
                 missing = True

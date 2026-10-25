@@ -7,6 +7,7 @@ review items.
       [--runs_dir <folder>]
   python experiments/policy_data/make_dataset.py <dataset_dir> --add <run>:<N> [<run>:<N> ...] [--runs_dir <folder>]
   python experiments/policy_data/make_dataset.py <dataset_dir> --review_items <version>
+  python experiments/policy_data/make_dataset.py <dataset_dir> --set KEY=VALUE [KEY=VALUE ...]
 
 --take takes the first N demos of each run whose towel stays inside the room image in every frame, in the order
 given, and numbers them 0, 1, 2, ... Each run needs <run>/check_towel_in_view.csv first:
@@ -72,6 +73,21 @@ reasons, 2 = the same items for the room view and for the wrist view, and a leve
 (the lists are in status.py). A dataset made with --take has version 2; a dataset without the value in its
 run_config.json has version 1. The version can change only while review.csv has no video review, so the reviews of a
 dataset never mix two lists. Reload the review page after the change.
+
+--set writes dataset settings into run_config.json (status.DATASET_SETTINGS). A dataset without them (the Franka
+towel datasets) uses the defaults, so nothing changes for it.
+  spec=<version>        spec version of new reference images (default: SPEC in status.py), a version in specs/,
+                        for example yam_towel/v1. It can change at any time; every image keeps its own version.
+  views=<folder>        subfolder of the dataset with demos/ and ref_sim/ (made by make_videos.py --out
+                        <dataset>/<folder>) that the reference images and the Cosmos videos use instead of the
+                        dataset's own demos/ and ref_sim/, for example top_right: the top and right wrist cameras of
+                        YAM side by side (make_videos.py --cameras top_camera right_wrist_camera).
+  cosmos_size=<W>x<H>   video size of run_cosmos.py (both sides a multiple of 16), for example 640x240
+  cosmos_chunk=<N>      frames of one Cosmos chunk with --all_steps (4k+1), for example 389: a long demo is made in
+                        chunks of N frames instead of one chunk
+views, cosmos_size and cosmos_chunk can change only while the dataset has no reference image and no Cosmos video,
+so all images and videos of a dataset have the same layout. Example (YAM towel):
+  make_dataset.py <dataset> --set spec=yam_towel/v1 views=top_right cosmos_size=640x240 cosmos_chunk=389
 """
 
 import argparse
@@ -92,6 +108,7 @@ import numpy as np
 
 import layout
 import status
+import variations
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SAME = ["task", "image_size", "wrist_focal_mm", "room_camera", "wrist_camera", "raw"]  # must match across runs
@@ -766,6 +783,61 @@ def set_review_items(args) -> None:
     status.update(ds)
 
 
+def setting_value(ds: str, key: str, value: str):
+    """The checked value of one --set KEY=VALUE (exits with the reason when it is wrong)."""
+    if key == "spec":
+        try:
+            variations.load(value)
+        except ValueError as e:
+            sys.exit(f"--set spec={value}: {e}")
+        if value not in variations.versions():
+            sys.exit(f"--set spec={value}: a dataset uses a version in specs/ ({', '.join(variations.versions())})")
+        return value
+    if key == "views":
+        if not value or os.path.isabs(value) or ".." in value.split("/"):
+            sys.exit(f"--set views={value}: give a subfolder of the dataset, for example top_right")
+        for sub in ("demos", "ref_sim"):
+            if not os.path.isdir(f"{ds}/{value}/{sub}"):
+                sys.exit(f"--set views={value}: {value}/{sub} not found in the dataset (make_videos.py --out "
+                         f"<dataset>/{value} makes it)")
+        return value.rstrip("/")
+    if key == "cosmos_size":
+        m = re.fullmatch(r"(\d+)x(\d+)", value)
+        if not m or int(m.group(1)) % 16 or int(m.group(2)) % 16 or not int(m.group(1)) or not int(m.group(2)):
+            sys.exit(f"--set cosmos_size={value}: use WxH with both sides a multiple of 16, for example 640x240")
+        return value
+    if key == "cosmos_chunk":
+        if not value.isdigit() or int(value) < 5 or (int(value) - 1) % 4:
+            sys.exit(f"--set cosmos_chunk={value}: use a frame count 4k+1, for example 389")
+        return int(value)
+    sys.exit(f"--set {key}: unknown setting, use one of {', '.join(status.DATASET_SETTINGS)}")
+
+
+def set_settings(args) -> None:
+    ds = os.path.abspath(args.dataset_dir)
+    if not status.is_dataset(ds):
+        sys.exit(f"{ds} is not a dataset folder (no sources.csv)")
+    new = {}
+    for item in args.set:
+        key, sep, value = item.partition("=")
+        if not sep or key not in status.DATASET_SETTINGS:
+            sys.exit(f"--set {item}: use KEY=VALUE with KEY one of {', '.join(status.DATASET_SETTINGS)}")
+        new[key] = setting_value(ds, key, value)
+    with status.lock(ds):
+        cfg = json.load(open(f"{ds}/run_config.json"))
+        made = bool(status.read_csv(f"{ds}/refs/references.csv")) or bool(glob.glob(f"{ds}/cosmos/*/"))
+        for key, value in new.items():
+            if key != "spec" and made and cfg.get(key) != value:
+                sys.exit(f"--set {key}: the dataset has reference images or Cosmos videos already, so {key} cannot "
+                         "change any more")
+        old = {key: cfg.get(key) for key in new}
+        cfg.update(new)
+        status.write_json(f"{ds}/run_config.json", cfg)
+    for key, value in new.items():
+        print(f"{key}: {old[key]!r} -> {value!r}")
+    status.update(ds)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("dataset_dir", nargs="?", help="dataset folder (for --replace, --add and --review_items)")
@@ -786,6 +858,8 @@ def main():
     ap.add_argument("--review_items", type=int, choices=status.REVIEW_ITEM_VERSIONS, default=None,
                     metavar="VERSION", help="set the version of the review items of the dataset (1 or 2), only "
                     "before its first video review")
+    ap.add_argument("--set", nargs="+", default=None, metavar="KEY=VALUE",
+                    help="dataset settings: spec, views, cosmos_size, cosmos_chunk (see above)")
     args = ap.parse_args()
     if args.name and not args.take:
         ap.error("--name is for --take only")
@@ -793,6 +867,8 @@ def main():
         ap.error("--skip_raw is for --take only (--add and --replace follow run_config.json of the dataset)")
     if args.review_items is not None and (args.take or args.add or args.replace is not None):
         ap.error("--review_items goes alone: <dataset_dir> --review_items VERSION")
+    if args.set and (args.take or args.add or args.replace is not None or args.review_items is not None):
+        ap.error("--set goes alone: <dataset_dir> --set KEY=VALUE ...")
     if args.take and args.replace is None and not args.add and not args.dataset_dir:
         take(args)
     elif args.dataset_dir and args.replace is not None and not args.take and not args.add:
@@ -801,9 +877,11 @@ def main():
         add(args)
     elif args.dataset_dir and args.review_items is not None:
         set_review_items(args)
+    elif args.dataset_dir and args.set:
+        set_settings(args)
     else:
         ap.error("use --take RUN:N ..., or <dataset_dir> --replace DEMO --reason TEXT, or <dataset_dir> --add "
-                 "RUN:N ..., or <dataset_dir> --review_items VERSION")
+                 "RUN:N ..., or <dataset_dir> --review_items VERSION, or <dataset_dir> --set KEY=VALUE ...")
 
 
 if __name__ == "__main__":

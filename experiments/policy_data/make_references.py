@@ -6,8 +6,10 @@
       [--retry] [--redo --reason "<why>"] [--max_attempts 2] [--dry_run] [--refs <folder>]
 
 <run_dir> is a run folder (make_demos.sh) or a dataset folder (make_dataset.py).
-Input: <run_dir>/ref_sim/000-049/demo_NNN_ref_sim.png (frame 0, room | wrist, 1024x512, made by make_videos.py).
-Output: <run_dir>/refs/000-049/demo_NNN_<tag>.png (1024x512) and <run_dir>/refs/references.csv with one row per
+Input: <run_dir>/ref_sim/000-049/demo_NNN_ref_sim.png (frame 0, room | wrist, 1024x512, made by make_videos.py); in
+a dataset with the setting views (make_dataset.py --set views=<folder>) <run_dir>/<folder>/ref_sim/... instead.
+Output: <run_dir>/refs/000-049/demo_NNN_<tag>.png (the size of the frame-0 image) and <run_dir>/refs/references.csv
+with one row per
 image: the axes and the place type, the prompt, the tokens, the cost and the spec version. --demos takes numbers and
 ranges (0-49 60 70-99); make the images in batches of any size, the ratios do not depend on the batch.
 
@@ -23,7 +25,9 @@ axes change, the place types are exact in every group of 50 demos, and no two im
 combination. The prompt is static on purpose: no action words (they make the model fold the towel), and it lists
 what must stay the same. The API has no seed, so the same call twice gives two different images.
 
-Size: the API needs at least 655,360 pixels, so the image is made at 2048x1024 (v2) and resized to 1024x512.
+Size: the API needs at least 655,360 pixels, so the image is made at the size of the spec (2048x1024 in v2) and
+resized to the size of the frame-0 image (1024x512 for the Franka towel). The two must have the same aspect.
+Spec: --spec, else the setting spec of a dataset (make_dataset.py --set spec=<version>), else SPEC in status.py.
 Flow: make_references.py -> checks/check_references.py -> make_references.py --retry -> check again -> run_cosmos.py
 Images that already exist are skipped, so the same command again makes only the missing ones (for example after
 an API error or a stop).
@@ -76,7 +80,6 @@ import layout
 import status
 import variations
 
-OUT_W, OUT_H = 1024, 512
 MIN_PIXELS = 655_360  # smallest image the API makes
 # USD per 1M tokens, standard rate of gpt-image-2 and gpt-image-2.5-sunburst (2026-09). Only for the cost column;
 # the bill is what OpenAI charges.
@@ -102,14 +105,18 @@ def api_settings(args, spec: variations.Spec) -> tuple:
     return args.model or spec.image["model"], args.quality or spec.image["quality"], args.size or spec.image["size"]
 
 
-def check_size(size: str) -> None:
+def check_size(size: str, aspect: tuple | None = None) -> None:
+    """An API size: both sides a multiple of 16, at least MIN_PIXELS, and with aspect (w, h) the same aspect as the
+    frame-0 image (within 1 %)."""
     try:
         w, h = (int(x) for x in size.lower().split("x"))
     except ValueError:
         sys.exit(f"--size {size}: use WIDTHxHEIGHT, for example 2048x1024")
-    if w != 2 * h or w % 16 or h % 16 or w * h < MIN_PIXELS:
-        sys.exit(f"--size {size}: needs aspect 2:1, both sides a multiple of 16, at least {MIN_PIXELS:,} pixels "
+    if w % 16 or h % 16 or w * h < MIN_PIXELS:
+        sys.exit(f"--size {size}: needs both sides a multiple of 16 and at least {MIN_PIXELS:,} pixels "
                  "(for example 2048x1024)")
+    if aspect and abs(w / h - aspect[0] / aspect[1]) > 0.01 * aspect[0] / aspect[1]:
+        sys.exit(f"--size {size}: the frame-0 image is {aspect[0]}x{aspect[1]}, the API size needs the same aspect")
 
 
 def retry_list(refs: str, tag: str) -> list:
@@ -198,15 +205,16 @@ def main():
                     help="demo numbers and ranges, e.g. 0-49 60 (default: every ref_sim image; with --retry: only "
                          "these of the failed ones)")
     ap.add_argument("--spec", default=None,
-                    help=f"spec version, e.g. v2 (specs/<version>.json; default {status.SPEC}, with --retry or --redo: "
-                         "the version of each image), or a json file for tests")
+                    help=f"spec version, e.g. v2 (specs/<version>.json; default: the spec of the dataset, else "
+                         f"{status.SPEC}; with --retry or --redo: the version of each image), or a json file for tests")
     ap.add_argument("--seed", type=int, default=None,
                     help="variation seed (default 0; in a dataset: its variation_seed)")
     ap.add_argument("--model", default=None, help="image model (default: the one of the spec)")
     ap.add_argument("--quality", default=None,
                     help="low, medium, high, auto = the API decides (default: the one of the spec)")
     ap.add_argument("--size", default=None,
-                    help="size the API makes (default: the one of the spec); the file is resized to 1024x512")
+                    help="size the API makes (default: the one of the spec); the file is resized to the size of the "
+                         "frame-0 image")
     ap.add_argument("--tag", default=None, help="reference number in the file name: demo_NNN_<tag>.png (default 01)")
     ap.add_argument("--workers", type=int, default=3, help="parallel API calls")
     ap.add_argument("--retry", action="store_true", help="make the images in refs/failed_references.txt again")
@@ -242,8 +250,8 @@ def main():
     for key, value in fixed.items():
         if getattr(args, key) is None:
             setattr(args, key, value)
-    if (args.spec and os.path.dirname(args.spec.path) != variations.SPECS_DIR and status.is_dataset(run)
-            and refs == f"{run}/refs"):
+    if (args.spec and args.spec.path != os.path.join(variations.SPECS_DIR, f"{args.spec.version}.json")
+            and status.is_dataset(run) and refs == f"{run}/refs"):
         sys.exit(f"--spec {args.spec.path}: a dataset uses only the versions in specs/ "
                  f"({', '.join(variations.versions())}); a json file is for tests, with --refs <other folder>")
     if not args.dry_run:
@@ -288,7 +296,7 @@ def make(args, run: str, refs: str, rejected: str, wanted: list | None, lock_dir
     elif wanted is not None:
         idxs = wanted
     else:
-        files = glob.glob(f"{run}/ref_sim/*/demo_*_ref_sim.png")
+        files = glob.glob(f"{status.views_dir(run)}/ref_sim/*/demo_*_ref_sim.png")
         idxs = [layout.demo_index(os.path.basename(f)) for f in files]
     idxs = sorted(set(idxs))
 
@@ -297,18 +305,20 @@ def make(args, run: str, refs: str, rejected: str, wanted: list | None, lock_dir
         the version has no file in specs/ (then give --spec)."""
         if args.spec:
             return args.spec
-        version = status.row_spec(last[name]) if (args.retry or args.redo) and name in last else status.SPEC
+        version = status.row_spec(last[name]) if (args.retry or args.redo) and name in last else default_spec
         try:
             return variations.load(version)
         except ValueError as e:
             sys.exit(f"{name}: {e}; give --spec")
 
+    default_spec = status.default_spec(run)  # the spec of the dataset (run_config.json), else SPEC
+    views = status.views_dir(run)  # the dataset itself, or its views folder (run_config.json)
     pending = status.pending_replacements(run) if sources else set()
     claimed = status.cosmos_claims(run) if args.redo else {}
     jobs, gave_up, no_src = [], [], []
     for idx in idxs:
         name = f"{layout.demo_name(idx)}_{args.tag}"
-        src = f"{layout.ref_sim_dir(run, idx)}/{layout.demo_name(idx)}_ref_sim.png"
+        src = f"{layout.ref_sim_dir(views, idx)}/{layout.demo_name(idx)}_ref_sim.png"
         dst = f"{layout.ref_dir(refs, idx)}/{name}.png"
         source = sources.get(idx, "")
         if idx in pending:
@@ -351,13 +361,17 @@ def make(args, run: str, refs: str, rejected: str, wanted: list | None, lock_dir
             continue
         attempt = attempts.get(name, 0)
         spec = spec_for(name)
-        check_size(api_settings(args, spec)[2])
+        img = cv2.imread(src)
+        if img is None:
+            sys.exit(f"{src}: cannot read the frame-0 image")
+        out_size = (img.shape[1], img.shape[0])
+        check_size(api_settings(args, spec)[2], out_size)
         if spec.version not in used:
             used[spec.version] = {spec.row_key(r) for r in rows}
         taken = used[spec.version]
         v = spec.draw(idx, args.seed, taken, attempt=attempt, tag=args.tag)
         taken.add(spec.key(v))
-        jobs.append((idx, name, attempt, source, args.seed, src, dst, v, spec.image_prompt(v), spec))
+        jobs.append((idx, name, attempt, source, args.seed, src, dst, v, spec.image_prompt(v), spec, out_size))
     if gave_up:
         here = os.path.relpath(os.path.dirname(os.path.abspath(__file__)))
         print(f"reached --max_attempts: demos {status.ranges(gave_up)}")
@@ -377,7 +391,7 @@ def make(args, run: str, refs: str, rejected: str, wanted: list | None, lock_dir
         specs = {j[9].version: j[9] for j in jobs}
         for spec in specs.values():
             print(f"prompt ({spec.version}):", spec.image["prompt"])
-        for idx, name, attempt, source, seed, src, dst, v, text, spec in jobs:
+        for idx, name, attempt, source, seed, src, dst, v, text, spec, out_size in jobs:
             print(f"{name} (attempt {attempt}, seed {seed}, {v['place_type']}, {spec.version}): {spec.sentence(v)}")
         types = collections.Counter(j[7]["place_type"] for j in jobs)
         print("place types:", ", ".join(f"{t} {types.get(t, 0)}" for t in variations.PLACE_TYPES))
@@ -392,7 +406,7 @@ def make(args, run: str, refs: str, rejected: str, wanted: list | None, lock_dir
     results = {"ok": 0, "cost": 0.0, "failed": [], "no_credit": False}
 
     def work(job):
-        idx, name, attempt, source, seed, src, dst, v, text, spec = job
+        idx, name, attempt, source, seed, src, dst, v, text, spec, out_size = job
         model, quality, size = api_settings(args, spec)
         if results["no_credit"]:
             with count_lock:
@@ -412,7 +426,7 @@ def make(args, run: str, refs: str, rejected: str, wanted: list | None, lock_dir
                 results["failed"].append(name)
             print(f"{name}: FAILED {type(e).__name__}: {e}", flush=True)
             return
-        ok, png = cv2.imencode(".png", cv2.resize(img, (OUT_W, OUT_H), interpolation=cv2.INTER_AREA))
+        ok, png = cv2.imencode(".png", cv2.resize(img, out_size, interpolation=cv2.INTER_AREA))
         if not ok:
             with count_lock:
                 results["failed"].append(name)
