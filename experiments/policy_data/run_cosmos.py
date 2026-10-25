@@ -52,6 +52,11 @@ Stop a job with Ctrl-C (or kill <pid>): the script stops the framework, keeps th
 same command then makes the rest. When a job ended without that (for example kill -9), the next run_cosmos.py on
 the dataset takes over its finished videos, if the reference image and the demo are still the same.
 
+Other tasks: the spec of a dataset (make_dataset.py --set spec=<version>) can give the video layout (variations.py):
+yam_towel/v1 takes the control videos from <dataset>/top_right/demos/ (top | right wrist, every step, made by
+make_videos.py), makes 640x240 videos (cosmos_launch.py gets the size as COSMOS_SIZE) and cuts the 773 steps into
+chunks of 389 frames. It needs --all_steps. The Franka towel specs have no layout, so nothing changes for them.
+
 Settings are the ones of the earlier tests: resolution 480 tier (patched to 1024x512), 81 frames, 16 fps,
 35 steps, guidance 3, control guidance 3, shift 5, seed 0. The framework's default negative prompt is used.
 The prompt comes from the spec version of each reference image (column spec of refs/references.csv; the file
@@ -98,9 +103,19 @@ GUIDE_INSET = 6  # color guide: the towel color is taken this many px inside the
 GUIDE_MIN_PX = 150  # color guide: a view with fewer such pixels at frame 0 takes the color of the other view
 
 
-def ref_video(png: str, mp4: str, frames: int, fps: int) -> None:
-    """Reference image -> 1024x512 still video, lossless. Cosmos reads the reference as a video."""
-    img, w, h, reason = check_references.load_and_resize(png)
+def ref_video(png: str, mp4: str, frames: int, fps: int, size: tuple | None = None) -> None:
+    """Reference image -> still video, lossless, 1024x512 (or size (w, h): the Cosmos size of the spec). Cosmos reads
+    the reference as a video."""
+    if size is None:
+        img, w, h, reason = check_references.load_and_resize(png)
+    else:
+        img, reason = cv2.imread(png), ""
+        if img is None:
+            reason = "cannot read"
+        elif abs(img.shape[1] / img.shape[0] - size[0] / size[1]) > 0.01 * size[0] / size[1]:
+            reason, img = f"aspect {img.shape[1]}x{img.shape[0]}, need the aspect of {size[0]}x{size[1]}", None
+        else:
+            img = cv2.cvtColor(cv2.resize(img, size, interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2RGB)
     if img is None:
         sys.exit(f"{png}: {reason}")
     tmp = mp4[: -len(".mp4")] + ".png"
@@ -235,6 +250,20 @@ def step_videos(run_dir: str, idx: int) -> tuple:
             make_videos.write(tmp, frames, fps, None, check=False)
             os.replace(tmp, source)
     return control, steps, fps
+
+
+def views_steps(run_dir: str, idx: int, control: str) -> tuple:
+    """--all_steps with a views folder: (steps, frames per second) of a demo. The control video there must have one
+    frame per step."""
+    import make_videos
+
+    with status.open_hdf5(demo_hdf5(run_dir)) as h5:
+        fps = make_videos.control_fps(h5)
+        steps = h5["data"][f"demo_{idx}"]["actions"].shape[0]
+    if video_frames(control) != steps:
+        sys.exit(f"{control}: {video_frames(control)} frames, demo_{idx} has {steps} steps (make it again with "
+                 "make_videos.py --all_frames)")
+    return steps, fps
 
 
 def set_fps(mp4: str, fps: float) -> None:
@@ -586,9 +615,12 @@ def main():
         sys.exit("--max must be 1 or more")
     dataset = status.is_dataset(run_dir)
     args.spec = load_spec(args.spec) if args.spec else None
-    if args.spec and dataset and os.path.dirname(args.spec.path) != variations.SPECS_DIR:
+    if args.spec and dataset and args.spec.path != os.path.join(variations.SPECS_DIR, f"{args.spec.version}.json"):
         sys.exit(f"--spec {args.spec.path}: a dataset uses only the versions in specs/ "
                  f"({', '.join(variations.versions())}); a json file is for tests in a run folder")
+    lay = status.dataset_spec(run_dir)
+    if lay.views and not args.all_steps:
+        sys.exit(f"spec {lay.version}: the videos in {lay.views}/ have every step, so use --all_steps")
     with contextlib.ExitStack() as stack:
         if dataset:
             if args.skip_check:
@@ -617,6 +649,11 @@ def main():
 def run(args, run_dir: str, out: str, pairs: list, sources: dict, prompts: dict, dataset: bool) -> int:
     """Write the specs, run the framework, move the videos to their group folders. prompts: name -> (spec, prompt)
     (video_prompts). -> exit code"""
+    # The video layout of the spec of a dataset (views folder, Cosmos size, chunk; yam_towel/v1); none for the Franka
+    # towel (the defaults: the demo folders, 1024x512, one chunk per video).
+    lay = status.dataset_spec(run_dir)
+    views = status.views_dir(run_dir)
+    size = tuple(int(x) for x in lay.cosmos_size.split("x")) if lay.cosmos_size else None
     os.makedirs(f"{out}/specs", exist_ok=True)
     os.makedirs(f"{out}/refs", exist_ok=True)
     os.makedirs(f"{out}/controls", exist_ok=True)
@@ -626,11 +663,13 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, prompts: dict,
                    "references": [n for _, n in pairs], "seed": args.seed, "steps": args.steps, "gpus": args.gpus,
                    "cp": args.cp, "port": port, "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
                    "all_steps": bool(args.all_steps)})
+    if lay.views or size or lay.cosmos_chunk:
+        config["layout"] = {"spec": lay.version, "views": lay.views, "size": lay.cosmos_size, "chunk": lay.cosmos_chunk}
     status.write_json(f"{out}/run_config.json", config)
     specs, meta = [], {}  # specs: the videos that need one framework run
     two_pass = []  # (demo, name, pass-1 spec, final spec, reference image, color guide): the videos with a color guide
     for idx, name in pairs:
-        control = f"{layout.demo_dir(run_dir, idx)}/{layout.demo_name(idx)}_geoedge.mp4"
+        control = f"{layout.demo_dir(views, idx)}/{layout.demo_name(idx)}_geoedge.mp4"
         ref = f"{layout.ref_dir(run_dir + '/refs', idx)}/{name}.png"
         for path in (control, ref):
             if not os.path.isfile(path):
@@ -644,11 +683,14 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, prompts: dict,
             if vspec.controls != ["edge"]:
                 sys.exit(f"{name}: spec {vspec.version} uses the controls {', '.join(vspec.controls)}; --all_steps "
                          "works with the edge control alone")
-            control, n_steps, rate = step_videos(run_dir, idx)  # the control video with every step
-            frames = chunk_frames(n_steps)
+            if lay.views:  # the views folder has the videos with every step already (make_videos.py --all_frames)
+                n_steps, rate = views_steps(run_dir, idx, control)
+            else:
+                control, n_steps, rate = step_videos(run_dir, idx)  # the control video with every step
+            frames = lay.cosmos_chunk or chunk_frames(n_steps)  # one chunk, or chunks of the size of the spec
             meta[name].update(all_steps=True, frames=n_steps, fps=rate)
         ref_mp4 = f"{out}/refs/{name}.mp4"
-        ref_video(ref, ref_mp4, frames=frames, fps=16)
+        ref_video(ref, ref_mp4, frames=frames, fps=16, size=size)
         depth = None
         if "depth" in vspec.controls:  # made here from the raw depth of the demo (a temporary file, like ref_mp4)
             depth = f"{out}/controls/{name}_depth.mp4"
@@ -674,6 +716,8 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, prompts: dict,
     env = framework_env(os.path.abspath(args.framework), args.tools)
     env["CUDA_VISIBLE_DEVICES"] = args.gpus
     env["HF_HOME"] = os.path.abspath(args.hf_home)
+    if lay.cosmos_size:  # the size slot of cosmos_launch.py (default 1024x512)
+        env["COSMOS_SIZE"] = lay.cosmos_size
 
     def command(spec_files: list) -> list:
         return [f"{os.path.abspath(args.framework)}/.venv/bin/torchrun", f"--nproc-per-node={n_gpu}",
