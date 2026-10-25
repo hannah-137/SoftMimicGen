@@ -1,6 +1,6 @@
 {
  "version": "yam_towel/v1",
- "changes": "First spec of the YAM towel task (two YAM arms in a booth: walls in front of the robots and on their left and right, open behind the robots, no roof). Video: split screen of the top camera and the right wrist camera, 640x240. From v9 of the Franka towel: the image prompt layout sentence, the robot words, and the place, table, lighting, robot and fabric lists. New: the walls stay walls (only the surface changes, decorations can hang on them), the walls reach the top edge of the left half, the place is seen only through the open side behind the robots, the axes above (by place type), wall and decor (0 to 2 items). No floor axis and no floor sentence. Tested on 3 images of yam_towel_n100_seeds101_200 (2026-10-25): walls kept in both halves; not tested on videos.",
+ "changes": "First spec of the YAM towel task (two YAM arms in a booth: walls in front of the robots and on their left and right, open behind the robots, no roof). Video: split screen of the top camera and the right wrist camera, 640x240. From v9 of the Franka towel: the image prompt layout sentence, the robot words, and the place, table, lighting, robot and fabric lists. New: the walls stay walls (only the surface changes, decorations can hang on them), the walls reach the top edge of the left half, the place is seen only through the open side behind the robots, the axes above (by place type: the ceiling of the room for an indoor place, the open sky outdoors), wall and decor (0 to 2 items). Left out of the v9 lists because they put a roof over the booth: the outdoor places \"a covered patio with a brick wall behind\", \"a food stall under a canopy\" and \"an apartment balcony with potted plants\", and the outdoor lighting \"open shade under a roof, soft light\". No floor axis and no floor sentence. Tested on 3 images of yam_towel_n100_seeds101_200 (2026-10-25): walls kept in both halves; not tested on videos.",
  "image": {
   "model": "gpt-image-2.5-sunburst",
   "quality": "medium",
@@ -184,7 +184,6 @@
     ],
     "outdoor": [
      "a paved university courtyard",
-     "a covered patio with a brick wall behind",
      "a rooftop terrace with a city skyline far behind",
      "a backyard with a lawn and a wooden fence",
      "a garden with flower beds and bushes",
@@ -209,9 +208,7 @@
      "a desert test site with sand and rocks",
      "a snowy yard with snow on the ground",
      "a plant nursery with rows of potted plants",
-     "a food stall under a canopy",
      "an industrial yard with pipes and tanks",
-     "an apartment balcony with potted plants",
      "a driveway in front of a house with a garage door"
     ]
    }
@@ -252,8 +249,7 @@
      "the ceiling of the room, high up"
     ],
     "outdoor": [
-     "the open sky",
-     "a high tent roof"
+     "the open sky"
     ]
    }
   },
@@ -409,7 +405,6 @@
     "bright sun behind thin clouds, soft shadows",
     "a bright overcast sky with soft even light",
     "a dark overcast sky before rain, dim",
-    "open shade under a roof, soft light",
     "tree shade with spots of sunlight",
     "hazy sun with a slight blue tone",
     "blue hour after sunset, dim and cool"
