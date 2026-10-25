@@ -31,8 +31,14 @@ review page, with {<axis name>}). Axis "place" has "places" (place type -> list,
 "lighting" has "indoor" ("{source}, {color}, {level}" with the lists indoor_sources, indoor_colors, indoor_levels),
 "strong" ("{color}" with strong_colors) and "outdoor" (a list). Every other axis has "values": a list, or, with
 "by": "<an earlier axis>", one list per value of that axis (v3: the thicknesses that fit each material; v6: the
-floors that fit each place, "by": "place"). "note" is free text. The draw order is lighting first, then the other
+floors that fit each place, "by": "place"), or, with "by": "place_type", one list per place type (yam_towel/v1: what
+is above the booth). An axis with "pick": {"min": a, "max": b, "none": "<text>"} takes a to b different items of its
+list (the count has the same chance for each number), joined with " and ", or the text "none" for 0 items
+(yam_towel/v1: the decorations on the walls). "note" is free text. The draw order is lighting first, then the other
 axes in order (as in v1 and v2).
+
+Specs of other tasks are in a folder per task: specs/<task>/<version>.json, loaded by the name "<task>/<version>"
+(yam_towel/v1 -> specs/yam_towel/v1.json). The specs in specs/ itself (v2 to v9) are the Franka towel ones.
 """
 
 import glob
@@ -121,7 +127,11 @@ class Spec:
                     v[f] = lighting
                 elif f == "place":
                     v[f] = rng.choice(places[ptype])
-                elif "by" in self.axes[f]:  # the list depends on the value of an earlier axis
+                elif "pick" in self.axes[f]:  # a few different items of the list, or the "none" text
+                    pick = self.axes[f]["pick"]
+                    items = rng.sample(self.axes[f]["values"], rng.randint(pick["min"], pick["max"]))
+                    v[f] = " and ".join(items) if items else pick["none"]
+                elif "by" in self.axes[f]:  # the list depends on the value of an earlier axis or on the place type
                     v[f] = rng.choice(self.axes[f]["values"][v[self.axes[f]["by"]]])
                 else:
                     v[f] = rng.choice(self.axes[f]["values"])
@@ -154,16 +164,18 @@ class Spec:
 
 
 def versions() -> list:
-    """The version names in specs/."""
-    return sorted(os.path.basename(p)[: -len(".json")] for p in glob.glob(f"{SPECS_DIR}/*.json"))
+    """The version names in specs/ (v2) and in its task folders (yam_towel/v1)."""
+    paths = glob.glob(f"{SPECS_DIR}/*.json") + glob.glob(f"{SPECS_DIR}/*/*.json")
+    return sorted(os.path.relpath(p, SPECS_DIR)[: -len(".json")] for p in paths)
 
 
 _loaded = {}
 
 
 def load(spec: str) -> Spec:
-    """A spec by version name (v2 -> specs/v2.json) or by the path of a json file (for tests; its version must not
-    be the name of a file in specs/). Raises ValueError with the reason when the file is missing or wrong."""
+    """A spec by version name (v2 -> specs/v2.json, yam_towel/v1 -> specs/yam_towel/v1.json) or by the path of a
+    json file (for tests; its version must not be the name of a file in specs/). Raises ValueError with the reason
+    when the file is missing or wrong."""
     by_path = spec.endswith(".json")
     path = os.path.abspath(spec if by_path else os.path.join(SPECS_DIR, f"{spec}.json"))
     if path in _loaded:
@@ -208,14 +220,25 @@ def _check(s: Spec) -> None:
     for i, f in enumerate(s.fields):
         if f in ("place", "lighting"):
             continue
-        values, by = s.axes[f].get("values"), s.axes[f].get("by")
+        values, by, pick = s.axes[f].get("values"), s.axes[f].get("by"), s.axes[f].get("pick")
+        if pick is not None:
+            if by is not None or not isinstance(values, list) or not values:
+                raise ValueError(f"axis {f}: pick needs a list of values and no by")
+            if not (isinstance(pick.get("min"), int) and isinstance(pick.get("max"), int)
+                    and 0 <= pick["min"] <= pick["max"] <= len(values) and isinstance(pick.get("none"), str)):
+                raise ValueError(f"axis {f}: pick needs min <= max <= the number of values, and a none text")
+            continue
         if by is None:
             if not isinstance(values, list) or not values:
                 raise ValueError(f"axis {f} needs a list of values")
             continue
-        keys = [x for xs in places.values() for x in xs] if by == "place" else s.axes.get(by, {}).get("values")
-        if by not in s.fields[:i] or not isinstance(keys, list):
-            raise ValueError(f"axis {f}: by must name the place axis or an earlier axis with a list of values")
+        if by == "place_type":
+            keys = PLACE_TYPES
+        else:
+            keys = [x for xs in places.values() for x in xs] if by == "place" else s.axes.get(by, {}).get("values")
+            if by not in s.fields[:i] or not isinstance(keys, list):
+                raise ValueError(f"axis {f}: by must name place_type, the place axis or an earlier axis with a list "
+                                 "of values")
         if not isinstance(values, dict) or set(values) != set(keys) or not all(values.values()):
             raise ValueError(f"axis {f} needs a list of values for each value of {by}")
     names = {f: f for f in s.fields} | {"place_type": "place_type"}
