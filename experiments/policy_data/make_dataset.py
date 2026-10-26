@@ -24,12 +24,14 @@ the name instead: the folder is <out>/<name>/ and the hdf5 is <name>.hdf5. Use i
   run_config.json                     the takes, every run (relative path and its settings), the fixed values
                                       for the reference images: variation_seed 0, tag 01, max_attempts 2, and
                                       the version of the review items of the review page: review_items 2
-All runs must have the same task, cameras, image size, video frames and simulation settings, and different seeds
+All runs must have the same task, cameras, image size, kind of video and simulation settings, and different seeds
 (the same seed repeats the start poses). The runs can number the instance ids differently, so every demo keeps the
 table of its run in the attribute instance_ids of data/demo_N (json: camera -> id -> prim path), next to source_run
 and source_demo. There is no <name>_instance_ids.json in a dataset. The hdf5 copy needs about 350 MB per demo; the
 script stops before it starts when the disk has less free space. The folder is built under a temporary name
 (.<name>.partial) and renamed at the end, so a stopped run leaves no half dataset.
+The kind of video is 81 frames (the default of make_demos.sh) or every step (make_demos.sh --all_frames: one frame
+per step, so the frame count differs from demo to demo).
 --skip_raw <kind> ... leaves the raw renderer data of these kinds (depth, normals, instance) out of the dataset
 hdf5: the observations <camera>_<kind>_raw are not copied. The runs keep them. Depth and normals are about three
 quarters of a demo (about 250 of 350 MB), and policy training does not read them. run_config.json records the
@@ -145,7 +147,7 @@ class Run:
         if len(self.check) != len(self.keys):
             sys.exit(f"{self.name}: check_towel_in_view.csv has {len(self.check)} demos, the hdf5 has "
                      f"{len(self.keys)}: run the check again")
-        self._frames = None
+        self._frames, self._steps = None, None
 
     def in_view(self) -> list:
         """Source demo indices whose towel stays in view, in order."""
@@ -171,7 +173,13 @@ class Run:
             cap = cv2.VideoCapture(f"{layout.demo_dir(self.path, s)}/{layout.demo_name(s)}_geoedge.mp4")
             self._frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             cap.release()
+            with h5py.File(self.hdf5, "r") as f:
+                self._steps = demo_steps(f["data"][f"demo_{s}"])
         return self._frames
+
+    def kind(self) -> str:
+        """video_kind() of the first usable demo."""
+        return video_kind(self.frames(), self._steps)
 
     def config(self) -> dict:
         """run_config.json without host paths (input and output keep only the file name)."""
@@ -185,9 +193,9 @@ def check_same(a: Run, b: Run) -> None:
         sys.exit(f"{a.name} and {b.name} differ in {diff}: they cannot be in one dataset")
     if a.env_args != b.env_args:
         sys.exit(f"{a.name} and {b.name} have different env_args in the hdf5: they cannot be in one dataset")
-    if a.frames() != b.frames():
-        sys.exit(f"{a.name} has {a.frames()} video frames, {b.name} has {b.frames()} (--all_frames): they cannot be "
-                 "in one dataset")
+    if a.kind() != b.kind():
+        sys.exit(f"{a.name} has videos of {a.kind()}, {b.name} of {b.kind()} (--all_frames): they cannot be in one "
+                 "dataset")
 
 
 def noise(cfg: dict) -> tuple:
@@ -205,6 +213,17 @@ def storage(group: h5py.Group) -> int:
 
     group.visititems(visit)
     return total
+
+
+def demo_steps(g: h5py.Group) -> int:
+    """Steps of one demo group data/demo_N."""
+    return int(g.attrs.get("num_samples", g["actions"].shape[0]))
+
+
+def video_kind(frames: int, steps: int) -> str:
+    """The kind of the videos of a demo: "every step" when the video has one frame per step (make_demos.sh
+    --all_frames), else "<frames> frames" (81 picked steps by default)."""
+    return "every step" if frames == steps else f"{frames} frames"
 
 
 def total_steps(data: h5py.Group) -> np.int64:
@@ -516,8 +535,8 @@ def new_plan(args, ds: str, cfg: dict, n: int, data: h5py.Group) -> tuple[str, d
                  "the start poses. Make the spare demos with a new --seed.")
     if run.name not in runs:
         old_run = Run(resolve_run(ds, cfg, old["source_run"], args.runs_dir))
-        if run.frames() != old_run.frames():
-            sys.exit(f"{run.name} has {run.frames()} video frames, the dataset has {old_run.frames()}")
+        if run.kind() != old_run.kind():
+            sys.exit(f"{run.name} has videos of {run.kind()}, the dataset has videos of {old_run.kind()}")
     if json.loads(data.attrs["env_args"]) != run.env_args:
         sys.exit(f"{run.name} has different env_args than the dataset")
     spare = [s for s in run.in_view() if (run.name, s) not in used and run.usable(s)]
@@ -663,7 +682,8 @@ def add_plan(args, ds: str, cfg: dict, data: h5py.Group) -> list:
     used, runs = used_sources(ds, sources), cfg.get("runs", {})
     base = next(iter(runs.values()))["config"]
     seeds = {int(v["config"]["seed"]) for v in runs.values()}
-    frames = video_frames(f"{layout.demo_dir(ds, 0)}/{layout.demo_name(0)}_geoedge.mp4")
+    kind = video_kind(video_frames(f"{layout.demo_dir(ds, 0)}/{layout.demo_name(0)}_geoedge.mp4"),
+                      demo_steps(data["demo_0"]))
     plan, need, names = [], 0, set()
     for t in args.add:
         path, sep, n = t.rpartition(":")
@@ -682,8 +702,8 @@ def add_plan(args, ds: str, cfg: dict, data: h5py.Group) -> list:
             if int(run.cfg["seed"]) in seeds:
                 sys.exit(f"{run.name} has seed {run.cfg['seed']}, which another run of the dataset has: the same "
                          "seed repeats the start poses")
-            if run.frames() != frames:
-                sys.exit(f"{run.name} has {run.frames()} video frames, the dataset has {frames}")
+            if run.kind() != kind:
+                sys.exit(f"{run.name} has videos of {run.kind()}, the dataset has videos of {kind}")
             seeds.add(int(run.cfg["seed"]))
         spare = [s for s in run.in_view() if (run.name, s) not in used and run.usable(s)]
         if len(spare) < int(n):
