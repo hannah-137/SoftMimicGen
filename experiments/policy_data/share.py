@@ -12,10 +12,13 @@ Layout of the share folder:
     lists/                                      review.csv, videos.csv, dataset.csv, ... (never .review_token)
     index.html, serve.py, README.md               the page, its small web server (a copy of share_serve.py), the notes
 
-A demo is in O when its video is approved, in weak or X when it is marked weak or rejected with a reason, else in
-not_reviewed (the rule of status.py). Only the current video of a demo is shared. The files of one demo are the
+A demo is in O when its video is approved, in weak or X when it is marked weak or rejected (with or without a
+reason), else in not_reviewed. Only the current video of a demo is shared. The files of one demo are the
 Cosmos video and its settings, the reference image, frame 0 of the simulator, the simulator video with every step
 (source_all), its edge video (geoedge_all), its instance mask video (instance_all), and a text file with the two prompts.
+Frame 0 of the simulator and the three simulator videos come from the views folder of the dataset spec when it has
+one (status.views_dir; yam_towel/v1: top_right/, the videos the Cosmos videos were made from, with every step and no
+_all in their names), else from the dataset itself; in the share they always have the names above.
 """
 import argparse
 import csv
@@ -24,6 +27,8 @@ import os
 import shutil
 import sys
 import time
+
+import cv2
 
 import layout
 import status
@@ -36,14 +41,9 @@ LISTS = ["review.csv", "review_history.csv", "videos.csv", "dataset.csv", "sourc
 SIM_FILES = ["source_all", "geoedge_all", "instance_all"]
 
 
-def folder_of(rev: dict, version: int) -> str:
+def folder_of(rev: dict) -> str:
     """The share folder of a video from its review.csv row: O, weak, X or not_reviewed."""
-    verdict = rev.get("verdict", "")
-    if verdict == "approved":
-        return "O"
-    if verdict in status.NEEDS_REASON and status.has_reason(rev, version):
-        return FOLDER_OF[verdict]
-    return "not_reviewed"
+    return FOLDER_OF.get(rev.get("verdict", ""), "not_reviewed")
 
 
 def cloth(row: dict) -> str:
@@ -64,6 +64,8 @@ def collect(ds: str) -> list:
     for r in status.read_csv(f"{ds}/refs/references.csv"):
         refs[r["name"]] = r
     dataset = {int(r["demo"]): r for r in status.read_csv(f"{ds}/dataset.csv")}
+    views = status.views_dir(ds)  # yam_towel/v1: <ds>/top_right, whose videos have every step and no _all names
+    ending = "_all" if views == ds else ""
     items = []
     for v in status.read_csv(f"{ds}/videos.csv"):
         if v.get("where") != "current":
@@ -83,11 +85,11 @@ def collect(ds: str) -> list:
             info = {}
         files = {f"{name}.mp4": f"{ds}/{v['file']}", f"{name}.json": f"{ds}/{v['file'][:-4]}.json",
                  f"{ref_name}.png": f"{layout.ref_dir(f'{ds}/refs', n)}/{ref_name}.png",
-                 f"{demo}_ref_sim.png": f"{layout.ref_sim_dir(ds, n)}/{demo}_ref_sim.png"}
+                 f"{demo}_ref_sim.png": f"{layout.ref_sim_dir(views, n)}/{demo}_ref_sim.png"}
         for k in SIM_FILES:
-            files[f"{demo}_{k}.mp4"] = f"{layout.demo_dir(ds, n)}/{demo}_{k}.mp4"
+            files[f"{demo}_{k}.mp4"] = f"{layout.demo_dir(views, n)}/{demo}_{k.removesuffix('_all')}{ending}.mp4"
         items.append({
-            "n": n, "name": name, "ref": ref_name, "f": folder_of(rev, version), "v": rev.get("verdict", ""),
+            "n": n, "name": name, "ref": ref_name, "f": folder_of(rev), "v": rev.get("verdict", ""),
             "s": v.get("spec") or ref.get("spec", ""),
             "r": status.reason_ids(rev.get("reasons"), version), "views": status.views_level(rev.get("views")),
             "refp": rev.get("ref_problem") == "1", "note": (rev.get("review") or v.get("review_text") or "").strip(),
@@ -355,8 +357,8 @@ Cosmos videos of the dataset `__DS__`, sorted by the review result. Updated __WH
 
 - __N__ videos: __COUNTS__.
 - `videos/<O|weak|X|not_reviewed>/demo_NNN/`: the files of one demo. O = approved, weak = usable but weak,
-  X = rejected. A video marked weak or rejected without a reason is in `not_reviewed`.
-  - `demo_NNN_TT.mp4`: Cosmos video, 1024x512, 20 fps, one frame per simulator step (131 to 133 frames).
+  X = rejected. A video marked weak or rejected is in weak or X with or without a reason.
+  - `demo_NNN_TT.mp4`: Cosmos video, __VIDEO__.
     Left half: room camera. Right half: wrist camera. `demo_NNN_TT.json`: settings of the Cosmos run (prompt, seed).
   - `demo_NNN_TT.png`: reference image (frame 0 of the Cosmos video). `demo_NNN_ref_sim.png`: frame 0 of the simulator.
   - `demo_NNN_source_all.mp4`: simulator video with the same frames. `demo_NNN_geoedge_all.mp4`: its edge video,
@@ -373,6 +375,22 @@ another computer, start the small web server of this folder and forward its port
 
 The server listens on this machine only. Several people can use it at the same time.
 """
+
+
+def video_words(items: list, out: str) -> str:
+    """Size, frame rate and frame count of the shared Cosmos videos, read from the files (for the README)."""
+    sizes, rates, frames = set(), set(), set()
+    for x in items:
+        cap = cv2.VideoCapture(f"{out}/videos/{x['f']}/{layout.demo_name(x['n'])}/{x['name']}.mp4")
+        if cap.isOpened():
+            sizes.add(f"{int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}")
+            rates.add(f"{round(cap.get(cv2.CAP_PROP_FPS))} fps")
+            frames.add(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)))
+        cap.release()
+    if not frames:
+        return "no video could be read"
+    count = f"{min(frames)} frames" if len(frames) == 1 else f"{min(frames)} to {max(frames)} frames"
+    return f"{' or '.join(sorted(sizes))}, {' or '.join(sorted(rates))}, one frame per simulator step ({count})"
 
 
 def write_page(items: list, version: int, out: str, ds: str) -> str:
@@ -395,7 +413,8 @@ def write_page(items: list, version: int, out: str, ds: str) -> str:
         f.write(page)
     with open(f"{out}/README.md", "w") as f:
         f.write(README.replace("__TITLE__", title).replace("__DS__", os.path.basename(ds)).replace("__WHEN__", when)
-                .replace("__N__", str(len(items))).replace("__COUNTS__", counts))
+                .replace("__N__", str(len(items))).replace("__COUNTS__", counts)
+                .replace("__VIDEO__", video_words(items, out)))
     shutil.copy2(os.path.join(os.path.dirname(os.path.abspath(__file__)), "share_serve.py"), f"{out}/serve.py")
     return counts
 
