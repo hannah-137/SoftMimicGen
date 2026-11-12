@@ -2,7 +2,7 @@
 
   python experiments/policy_data/run_cosmos.py <run_dir> --framework <cosmos-framework dir> \
       --checkpoint <Cosmos3 checkpoint dir> --gpus 2,3 [--cp 2] [--demos 0-49] [--max 25] [--spec v2] [--port 29511]
-      [--all_steps]
+      [--all_steps [--chunk 53]]
 
 Input: <run_dir>/demos/000-049/demo_NNN/demo_NNN_geoedge.mp4 (control video) and the reference images in
 <run_dir>/refs/000-049/ (demo_NNN_<tag>.png or demo_NNN.png, checked by checks/check_references.py; 50 demos per
@@ -35,11 +35,13 @@ videos into the demo folder, from the demo hdf5: demo_NNN_geoedge_all.mp4 (the c
 demo_NNN_source_all.mp4 (the simulator video, which review.py shows next to the Cosmos video), both at the control
 rate of the simulator (20 fps for the Franka tasks). The 81-frame videos stay as they are. Cosmos makes the video in
 one chunk of the next 4k+1 frames at or above the step count (133 frames for 131 to 133 steps), and the framework
-cuts the result to the step count. The framework writes 16 fps; the finished file is then stored at the control rate
-with a stream copy, so no frame is encoded again. One chunk of 133 frames fits on 2 GPUs of 48 GB with Super fp8 and
-takes about 23 minutes (81 frames: about 12). Longer demos are not tested. It works for the spec versions that use
-only the edge control (no depth, no color guide). The video json gets all_steps, frames and fps in policy_data.
-Use one kind of video in a dataset: all with --all_steps, or all without.
+cuts the result to the step count. In a run folder, --chunk N makes the video in chunks of N frames instead (4k+1,
+e.g. 53 for 10 chunks of a 492-step demo). Each chunk after the first starts from the last frame of the chunk before.
+A dataset takes its chunk from its spec (cosmos.chunk). The framework writes 16 fps; the finished file is then stored
+at the control rate with a stream copy, so no frame is encoded again. One chunk of 133 frames fits on 2 GPUs of 48 GB
+with Super fp8 and takes about 23 minutes (81 frames: about 12). Longer demos are not tested. It works for the spec
+versions that use only the edge control (no depth, no color guide). The video json gets all_steps, frames and fps in
+policy_data. Use one kind of video in a dataset: all with --all_steps, or all without.
 
 Output: <run_dir>/cosmos/<checkpoint folder name>_<YYYYMMDD>_<HHMM>/ (with _2, _3, ... when that name exists) with,
 per reference, 000-049/<name>.mp4 (the video) and 000-049/<name>.json (the settings the framework used, plus
@@ -176,7 +178,8 @@ def other_version(pairs: list, rows: dict, sources: dict, chosen: variations.Spe
 
 def spec(name: str, control: str, ref: str, prompt: str, seed: int, steps: int, depth: str | None = None,
          color: str | None = None, frames: int = N_FRAMES) -> dict:
-    """The framework spec of one video. frames: frames of the one chunk (81, or chunk_frames() with --all_steps)."""
+    """The framework spec of one video. frames: frames of one chunk (81; with --all_steps chunk_frames(), --chunk or
+    the chunk of the spec)."""
     out = {
         "model_mode": "video2video", "resolution": "480", "aspect_ratio": "16,9", "num_frames": frames, "fps": 16,
         "shift": 5.0, "num_steps": steps, "seed": seed, "num_video_frames_per_chunk": frames,
@@ -602,7 +605,11 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps", type=int, default=35)
     ap.add_argument("--all_steps", action="store_true",
-                    help="every simulator step is a video frame (one chunk), instead of 81 picked steps")
+                    help="every simulator step is a video frame (one chunk, or chunks of --chunk frames), instead of "
+                         "81 picked steps")
+    ap.add_argument("--chunk", type=int, default=None,
+                    help="with --all_steps in a run folder: frames of one Cosmos chunk, 4k+1, e.g. 53 (default: one "
+                         "chunk of the next 4k+1 at or above the step count)")
     ap.add_argument("--dry_run", action="store_true", help="write the specs and print the command, do not run")
     args = ap.parse_args()
     if not args.hf_home:
@@ -621,6 +628,13 @@ def main():
     lay = status.dataset_spec(run_dir)
     if lay.views and not args.all_steps:
         sys.exit(f"spec {lay.version}: the videos in {lay.views}/ have every step, so use --all_steps")
+    if args.chunk is not None:
+        if not args.all_steps:
+            sys.exit("--chunk needs --all_steps")
+        if dataset:
+            sys.exit("--chunk is for a run folder; a dataset takes its chunk from its spec (cosmos.chunk)")
+        if args.chunk < 5 or (args.chunk - 1) % 4:
+            sys.exit("--chunk must be a frame count 4k+1 of 5 or more, e.g. 53")
     with contextlib.ExitStack() as stack:
         if dataset:
             if args.skip_check:
@@ -650,7 +664,7 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, prompts: dict,
     """Write the specs, run the framework, move the videos to their group folders. prompts: name -> (spec, prompt)
     (video_prompts). -> exit code"""
     # The video layout of the spec of a dataset (views folder, Cosmos size, chunk; yam_towel/v1); none for the Franka
-    # towel (the defaults: the demo folders, 1024x512, one chunk per video).
+    # towel (the defaults: the demo folders, 1024x512, one chunk per video, or chunks of --chunk in a run folder).
     lay = status.dataset_spec(run_dir)
     views = status.views_dir(run_dir)
     size = tuple(int(x) for x in lay.cosmos_size.split("x")) if lay.cosmos_size else None
@@ -663,6 +677,8 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, prompts: dict,
                    "references": [n for _, n in pairs], "seed": args.seed, "steps": args.steps, "gpus": args.gpus,
                    "cp": args.cp, "port": port, "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
                    "all_steps": bool(args.all_steps)})
+    if args.chunk:
+        config["chunk"] = args.chunk
     if lay.views or size or lay.cosmos_chunk:
         config["layout"] = {"spec": lay.version, "views": lay.views, "size": lay.cosmos_size, "chunk": lay.cosmos_chunk}
     status.write_json(f"{out}/run_config.json", config)
@@ -687,7 +703,7 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, prompts: dict,
                 n_steps, rate = views_steps(run_dir, idx, control)
             else:
                 control, n_steps, rate = step_videos(run_dir, idx)  # the control video with every step
-            frames = lay.cosmos_chunk or chunk_frames(n_steps)  # one chunk, or chunks of the size of the spec
+            frames = args.chunk or lay.cosmos_chunk or chunk_frames(n_steps)  # one chunk, or chunks of --chunk or spec
             meta[name].update(all_steps=True, frames=n_steps, fps=rate)
         ref_mp4 = f"{out}/refs/{name}.mp4"
         ref_video(ref, ref_mp4, frames=frames, fps=16, size=size)
