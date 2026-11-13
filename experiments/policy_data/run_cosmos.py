@@ -565,7 +565,8 @@ def framework_env(fw: str, tools: str | None) -> dict:
     nv = glob.glob(f"{fw}/.venv/lib/python3.*/site-packages/nvidia")
     if nv:
         libs = [d for d in glob.glob(f"{nv[0]}/*/lib") if os.path.isdir(d)]
-        env["LD_LIBRARY_PATH"] = ":".join(libs)
+        extra = ["/.singularity.d/libs"] if os.path.isdir("/.singularity.d/libs") else []  # driver libs of apptainer --nv
+        env["LD_LIBRARY_PATH"] = ":".join(libs + extra)
         env["NVRTC_HOME"], env["CURAND_HOME"], env["CUDNN_HOME"] = f"{nv[0]}/cuda_nvrtc", f"{nv[0]}/curand", f"{nv[0]}/cudnn"
     env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     env["PYTHONUNBUFFERED"] = "1"
