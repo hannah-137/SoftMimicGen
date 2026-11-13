@@ -601,6 +601,8 @@ def main():
     ap.add_argument("--cp", type=int, default=1, help="context parallel size (2 for Super fp8 on 2 GPUs)")
     ap.add_argument("--port", type=int, default=None, help="torchrun master port (default: the first free from 29511)")
     ap.add_argument("--no_sound", action="store_true", help="do not load the sound tokenizer (saves GPU memory)")
+    ap.add_argument("--no_vision", action="store_true",
+                    help="do not build the vision encoder of the text model (saves GPU memory)")
     ap.add_argument("--spec", default=None,
                     help="make videos only for the images of this spec version, e.g. v3 (default: all; each video "
                          "follows the version of its image); a json file for tests in a run folder")
@@ -745,7 +747,8 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, prompts: dict,
                 os.path.abspath(args.checkpoint), "--no-guardrails", "--benchmark", "--experiment-overrides",
                 "model.config.tokenizer.encode_chunk_frames.480=4",
                 *(["model.config.sound_gen=false", "model.config.sound_dim=null",
-                   "model.config.sound_tokenizer=null"] if args.no_sound else [])]
+                   "model.config.sound_tokenizer=null"] if args.no_sound else []),
+                *(["model.config.vlm_config.model_instance.config.include_visual=false"] if args.no_vision else [])]
 
     print(f"[run_cosmos] {len(pairs)} videos: demos {status.ranges(i for i, _ in pairs)} -> {out}", flush=True)
     if specs:
