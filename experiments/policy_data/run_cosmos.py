@@ -2,7 +2,7 @@
 
   python experiments/policy_data/run_cosmos.py <run_dir> --framework <cosmos-framework dir> \
       --checkpoint <Cosmos3 checkpoint dir> --gpus 2,3 [--cp 2] [--demos 0-49] [--max 25] [--spec v2] [--port 29511]
-      [--all_steps [--chunk 53]] [--no_sound] [--no_vision] [--no_text_head] [--free_gather_early]
+      [--all_steps [--chunk 53 [--overlap 13]]] [--no_sound] [--no_vision] [--no_text_head] [--free_gather_early]
 
 Input: <run_dir>/demos/000-049/demo_NNN/demo_NNN_geoedge.mp4 (control video) and the reference images in
 <run_dir>/refs/000-049/ (demo_NNN_<tag>.png or demo_NNN.png, checked by checks/check_references.py; 50 demos per
@@ -37,6 +37,8 @@ rate of the simulator (20 fps for the Franka tasks). The 81-frame videos stay as
 one chunk of the next 4k+1 frames at or above the step count (133 frames for 131 to 133 steps), and the framework
 cuts the result to the step count. In a run folder, --chunk N makes the video in chunks of N frames instead (4k+1,
 e.g. 53 for 10 chunks of a 492-step demo). Each chunk after the first starts from the last frame of the chunk before.
+--overlap N gives a chunk the last N frames of the chunk before instead of 1 (4k+1, e.g. 13). The video keeps its
+frame count.
 A dataset takes its chunk from its spec (cosmos.chunk). The framework writes 16 fps; the finished file is then stored
 at the control rate with a stream copy, so no frame is encoded again. One chunk of 133 frames fits on 2 GPUs of 48 GB
 with Super fp8 and takes about 23 minutes (81 frames: about 12). Longer demos are not tested. It works for the spec
@@ -182,13 +184,13 @@ def other_version(pairs: list, rows: dict, sources: dict, chosen: variations.Spe
 
 
 def spec(name: str, control: str, ref: str, prompt: str, seed: int, steps: int, depth: str | None = None,
-         color: str | None = None, frames: int = N_FRAMES) -> dict:
+         color: str | None = None, frames: int = N_FRAMES, overlap: int = 1) -> dict:
     """The framework spec of one video. frames: frames of one chunk (81; with --all_steps chunk_frames(), --chunk or
-    the chunk of the spec)."""
+    the chunk of the spec). overlap: frames that a chunk takes from the end of the chunk before (--overlap)."""
     out = {
         "model_mode": "video2video", "resolution": "480", "aspect_ratio": "16,9", "num_frames": frames, "fps": 16,
         "shift": 5.0, "num_steps": steps, "seed": seed, "num_video_frames_per_chunk": frames,
-        "num_conditional_frames": 1,
+        "num_conditional_frames": overlap,
         "share_vision_temporal_positions": True, "negative_metadata_mode": "none", "negative_prompt_keep_metadata": False,
         "guidance": 3.0, "control_guidance": 3.0, "name": name,
         "edge": {"control_path": control, "preset_edge_threshold": "medium"},
@@ -623,6 +625,8 @@ def main():
     ap.add_argument("--chunk", type=int, default=None,
                     help="with --all_steps in a run folder: frames of one Cosmos chunk, 4k+1, e.g. 53 (default: one "
                          "chunk of the next 4k+1 at or above the step count)")
+    ap.add_argument("--overlap", type=int, default=1,
+                    help="with --chunk: frames that a chunk takes from the end of the chunk before, 4k+1 (default 1)")
     ap.add_argument("--dry_run", action="store_true", help="write the specs and print the command, do not run")
     args = ap.parse_args()
     if not args.hf_home:
@@ -648,6 +652,11 @@ def main():
             sys.exit("--chunk is for a run folder; a dataset takes its chunk from its spec (cosmos.chunk)")
         if args.chunk < 5 or (args.chunk - 1) % 4:
             sys.exit("--chunk must be a frame count 4k+1 of 5 or more, e.g. 53")
+    if args.overlap != 1:
+        if args.chunk is None:
+            sys.exit("--overlap needs --chunk")
+        if args.overlap < 1 or (args.overlap - 1) % 4 or args.overlap >= args.chunk:
+            sys.exit("--overlap must be a frame count 4k+1 below --chunk, e.g. 13")
     with contextlib.ExitStack() as stack:
         if dataset:
             if args.skip_check:
@@ -694,6 +703,8 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, prompts: dict,
                                       if getattr(args, n)]})
     if args.chunk:
         config["chunk"] = args.chunk
+    if args.overlap != 1:
+        config["overlap"] = args.overlap
     if lay.views or size or lay.cosmos_chunk:
         config["layout"] = {"spec": lay.version, "views": lay.views, "size": lay.cosmos_size, "chunk": lay.cosmos_chunk}
     status.write_json(f"{out}/run_config.json", config)
@@ -738,7 +749,8 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, prompts: dict,
             guide = None
             specs.append(path)
         with open(path, "w") as f:
-            json.dump(spec(name, control, ref_mp4, prompt, args.seed, args.steps, depth, guide, frames), f, indent=1)
+            json.dump(spec(name, control, ref_mp4, prompt, args.seed, args.steps, depth, guide, frames,
+                           args.overlap), f, indent=1)
     config["spec"] = ",".join(sorted({v.version for v, _ in prompts.values()}))  # each video json has its own
     config["policy_data"] = meta  # lets a later job take over the videos if this one ends without moving them
     status.write_json(f"{out}/run_config.json", config)
