@@ -11,9 +11,7 @@ cat << 'EOF'
 #   You will be asked for:                                   #
 #     mount_dir  host dir mounted to /workspace              #
 #                (this repo must be inside it)               #
-#                e.g. /data/hyeon                            #
-#     name       container name, use <user>_smg              #
-#                e.g. hyeon_smg                              #
+#     name       container name                              #
 #                                                            #
 ##############################################################
 EOF

@@ -18,10 +18,9 @@ apt-get install -y --no-install-recommends \
   libatomic1 libegl1 libgl1 libglu1-mesa libglx0 libgomp1 \
   libsm6 libx11-dev libxi6 libxrandr2 libxt6 libglib2.0-0 libnghttp2-14 vulkan-tools
 rm -rf /var/lib/apt/lists/*
-# A user with the host user's ids, so files written with `docker exec -u <user>` belong to the host user.
 if [ -n "$HOST_UID" ] && ! id -u "$HOST_UID" >/dev/null 2>&1; then
   groupadd -g "$HOST_GID" "$HOST_USER" 2>/dev/null || true
-  useradd -m -u "$HOST_UID" -g "$HOST_GID" -s /bin/bash "$HOST_USER"
+  useradd -M -d /workspace -u "$HOST_UID" -g "$HOST_GID" -s /bin/bash "$HOST_USER"
 fi
 
 echo "=== [2/6] NVIDIA Vulkan / EGL registration ==="
@@ -40,7 +39,7 @@ else
 fi
 
 echo "=== [4/6] miniconda (installed on /workspace, i.e. the host data disk, not in the container layer) ==="
-# The container layer lives on the host root disk, which can be small on a shared server (barista: 868 GB, 99% full).
+# The container layer lives on the host root disk, which can be small and nearly full on a shared server.
 # miniconda + conda envs (~30 GB) and /root/.cache (pip/hf/Isaac Sim caches) go to /workspace/tools instead;
 # /opt/miniconda3 stays as a symlink so every script and .bashrc keeps its path. Existing installs are left untouched.
 MC=/workspace/tools/miniconda3
