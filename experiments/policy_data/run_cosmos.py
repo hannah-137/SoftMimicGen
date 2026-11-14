@@ -2,7 +2,7 @@
 
   python experiments/policy_data/run_cosmos.py <run_dir> --framework <cosmos-framework dir> \
       --checkpoint <Cosmos3 checkpoint dir> --gpus 2,3 [--cp 2] [--demos 0-49] [--max 25] [--spec v2] [--port 29511]
-      [--all_steps [--chunk 53]]
+      [--all_steps [--chunk 53]] [--no_sound] [--no_vision] [--no_text_head] [--free_gather_early]
 
 Input: <run_dir>/demos/000-049/demo_NNN/demo_NNN_geoedge.mp4 (control video) and the reference images in
 <run_dir>/refs/000-049/ (demo_NNN_<tag>.png or demo_NNN.png, checked by checks/check_references.py; 50 demos per
@@ -70,6 +70,11 @@ towel moves (the reference image fixes only frame 0). So a video always follows 
 folder: --spec <file.json>. An image that make_references.py did not make (no row in refs/references.csv) gets the
 version of --spec, else SPEC in status.py; its spec needs an empty cosmos sentence.
 The Cosmos3 checkpoint must fit on the given GPUs: Super fp8 needs 2 GPUs (48 GB) with --cp 2, Nano fp8 needs 1.
+Four options lower the GPU memory: --no_sound (no sound tokenizer), --no_vision (no vision encoder in the text
+model), --no_text_head (no text output layer) and --free_gather_early (FSDP frees every gather buffer right after
+use). Video generation does not call the three parts. cosmos_launch.py explains the last two options. Super fp8 does
+not fit on 2 GPUs of 44 GiB without them. With --no_sound --no_vision a chunk of 165 frames fits. run_config.json
+lists the options of the run (memory_options).
 The torchrun port is the first free one from 29511 that no running job of the same dataset has taken (--port sets
 it; give --port when jobs of other datasets or run folders start at the same moment).
 The framework downloads small parts (text encoder, tokenizer) with "uv run hf download". Give --tools <dir> when
@@ -603,6 +608,10 @@ def main():
     ap.add_argument("--no_sound", action="store_true", help="do not load the sound tokenizer (saves GPU memory)")
     ap.add_argument("--no_vision", action="store_true",
                     help="do not build the vision encoder of the text model (saves GPU memory)")
+    ap.add_argument("--no_text_head", action="store_true",
+                    help="do not load the text output layer, video generation does not call it (saves GPU memory)")
+    ap.add_argument("--free_gather_early", action="store_true",
+                    help="free every FSDP gather buffer right after use (saves GPU memory)")
     ap.add_argument("--spec", default=None,
                     help="make videos only for the images of this spec version, e.g. v3 (default: all; each video "
                          "follows the version of its image); a json file for tests in a run folder")
@@ -680,7 +689,9 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, prompts: dict,
     config.update({"checkpoint": os.path.abspath(args.checkpoint), "demos": [i for i, _ in pairs],
                    "references": [n for _, n in pairs], "seed": args.seed, "steps": args.steps, "gpus": args.gpus,
                    "cp": args.cp, "port": port, "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                   "all_steps": bool(args.all_steps)})
+                   "all_steps": bool(args.all_steps),
+                   "memory_options": [n for n in ("no_sound", "no_vision", "no_text_head", "free_gather_early")
+                                      if getattr(args, n)]})
     if args.chunk:
         config["chunk"] = args.chunk
     if lay.views or size or lay.cosmos_chunk:
@@ -738,6 +749,10 @@ def run(args, run_dir: str, out: str, pairs: list, sources: dict, prompts: dict,
     env["HF_HOME"] = os.path.abspath(args.hf_home)
     if lay.cosmos_size:  # the size slot of cosmos_launch.py (default 1024x512)
         env["COSMOS_SIZE"] = lay.cosmos_size
+    if args.no_text_head:  # cosmos_launch.py reads both
+        env["COSMOS_NO_TEXT_HEAD"] = "1"
+    if args.free_gather_early:
+        env["COSMOS_FREE_GATHER_EARLY"] = "1"
 
     def command(spec_files: list) -> list:
         return [f"{os.path.abspath(args.framework)}/.venv/bin/torchrun", f"--nproc-per-node={n_gpu}",
