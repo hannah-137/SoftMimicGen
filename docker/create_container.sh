@@ -49,6 +49,7 @@ docker run -d --gpus all \
   -e ACCEPT_EULA=Y \
   -e TMPDIR=/workspace/tools/.tmp \
   -e REPO_NAME="$REPO_NAME" \
+  -e HOST_USER="$(id -un)" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
   --name "$NAME" \
   -v "$DATA_DIR":/workspace \
   ubuntu:24.04 sleep infinity

@@ -14,10 +14,15 @@ mkdir -p "$TMPDIR"
 echo "=== [1/6] system libraries ==="
 apt-get update
 apt-get install -y --no-install-recommends \
-  curl wget git ca-certificates unzip build-essential cmake \
+  curl wget git git-lfs ca-certificates unzip build-essential cmake ffmpeg openssh-client \
   libatomic1 libegl1 libgl1 libglu1-mesa libglx0 libgomp1 \
-  libsm6 libxi6 libxrandr2 libxt6 libglib2.0-0 libnghttp2-14 vulkan-tools
+  libsm6 libx11-dev libxi6 libxrandr2 libxt6 libglib2.0-0 libnghttp2-14 vulkan-tools
 rm -rf /var/lib/apt/lists/*
+# A user with the host user's ids, so files written with `docker exec -u <user>` belong to the host user.
+if [ -n "$HOST_UID" ] && ! id -u "$HOST_UID" >/dev/null 2>&1; then
+  groupadd -g "$HOST_GID" "$HOST_USER" 2>/dev/null || true
+  useradd -m -u "$HOST_UID" -g "$HOST_GID" -s /bin/bash "$HOST_USER"
+fi
 
 echo "=== [2/6] NVIDIA Vulkan / EGL registration ==="
 mkdir -p /usr/share/glvnd/egl_vendor.d /etc/vulkan/icd.d /etc/vulkan/implicit_layer.d
