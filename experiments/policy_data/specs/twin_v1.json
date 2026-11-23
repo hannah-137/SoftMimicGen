@@ -1,0 +1,47 @@
+{
+ "version": "twin_v1",
+ "changes": "First spec for the digital twin of the Franka towel scene (492 steps per demo). Two-image mode: the image call sends the frame-0 image of the demo for the layout and look.png of the run folder for the look. look.png is a real photo of the same scene from the room camera. One fixed look: place and lighting have one value each, because every spec needs both axes. No reference check: the twin hdf5 has no normals.",
+ "image": {
+  "model": "gpt-image-2.5-sunburst",
+  "quality": "medium",
+  "size": "2048x1024",
+  "look_image": "look.png",
+  "prompt": "There are two images. The first image is a simulator image. It is a split screen: left the room camera, right the camera on the robot gripper. The second image is a real photo of the same scene, taken with the room camera. Turn the first image into a realistic photo. Keep the composition of the first image exactly the same in both halves: the same camera viewpoint and framing, and the same size and position of the robot, the towel, the table and the background. Keep the same aspect ratio. Do not crop, zoom or pad. The robot keeps the same pose. The towel keeps exactly the same position, shape, size and orientation as in the first image. Do not add, remove, move, fold, bend or reshape anything. There is exactly one towel, flat on the table. {variation} No text, no logos, no watermark."
+ },
+ "axes": [
+  {
+   "name": "place",
+   "note": "One value for every place type: the look comes from the second image.",
+   "places": {
+    "laboratory": ["the room of the second image"],
+    "workshop": ["the room of the second image"],
+    "factory_warehouse": ["the room of the second image"],
+    "office": ["the room of the second image"],
+    "school": ["the room of the second image"],
+    "home": ["the room of the second image"],
+    "medical_care": ["the room of the second image"],
+    "shop_restaurant_hotel": ["the room of the second image"],
+    "studio_venue_sports": ["the room of the second image"],
+    "other_indoor": ["the room of the second image"],
+    "outdoor": ["the room of the second image"]
+   }
+  },
+  {
+   "name": "lighting",
+   "note": "One value: the light comes from the second image.",
+   "indoor": "the light of the second image",
+   "indoor_sources": ["the light of the second image"],
+   "indoor_colors": ["the light of the second image"],
+   "indoor_levels": ["the light of the second image"],
+   "strong": "the light of the second image",
+   "strong_colors": ["the light of the second image"],
+   "outdoor": ["the light of the second image"]
+  }
+ ],
+ "sentence": "Take only the look from the second image: the materials and colors of the robot, the table and the towel, the light and the background. Do not take the position of the towel from the second image. In the right half, use the same materials and light as in the left half.",
+ "cosmos": {
+  "prompt": "A Franka robot arm folds a gray towel on a black table, realistic video. The towel has the same color and texture on both sides. The left camera is fixed and the right camera moves with the gripper. Split screen: left, the room camera; right, the camera on the robot gripper."
+ },
+ "reference_check": false,
+ "card": "look of look.png (real photo of the twin scene)"
+}
